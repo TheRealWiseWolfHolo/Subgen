@@ -1,0 +1,75 @@
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Virtual env / local env files
+.env
+.env.*
+.venv/
+venv/
+env/
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+pip-wheel-metadata/
+
+# Runtime outputs and archives
+output/
+history/
+runtime/
+dev/
+installer_files/
+
+# Batch artifacts
+batch/input/
+batch/output/
+batch/tasks_setting.xlsx
+
+# Model cache and local heavy assets
+_model_cache/
+GPT-SoVITS-Inference/
+uvr5/
+_backup/
+
+# Media / binary artifacts
+*.mp4
+*.mkv
+*.mov
+*.avi
+*.webm
+*.mp3
+*.wav
+*.flac
+*.m4a
+
+# Local config and secrets
+config.local.py
+config_hide.py
+config.backup.yaml
+.pypirc
+
+# Tool binaries
+/ffmpeg
+/ffmpeg.exe
+/ffprobe
+/ffprobe.exe
+
+# Git conflict/backups
+*.orig
+*.rej
