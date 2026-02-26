@@ -22,9 +22,9 @@ def _safe_load_key(key, default):
 def render_terminology_profile_selector():
     enabled_cfg = _safe_load_key("streamlit_terminology_profile_select", True)
     enabled = st.toggle(
-        "Terminology profile selection",
+        "Terminology Profile Selection / 术语档案选择",
         value=enabled_cfg,
-        help="Enable selecting/creating a terminology profile before summary extraction."
+        help="Enable selecting/creating a terminology profile before summary extraction. / 在摘要阶段前启用术语档案选择或新建。"
     )
     if enabled != enabled_cfg:
         update_key("streamlit_terminology_profile_select", enabled)
@@ -32,25 +32,45 @@ def render_terminology_profile_selector():
 
     if not enabled:
         st.session_state.pop("terminology_profile_name", None)
+        st.session_state.pop("terminology_profile_active", None)
         return
+
+    # Backward compatibility for previous session key.
+    if "terminology_profile_active" not in st.session_state and "terminology_profile_name" in st.session_state:
+        st.session_state["terminology_profile_active"] = st.session_state["terminology_profile_name"]
 
     profile_names = _4_1_summarize.list_terminology_profile_names()
     options = profile_names + ["+ New profile"]
     default_idx = 0
-    if "terminology_profile_name" in st.session_state:
-        current = st.session_state["terminology_profile_name"]
+    active_profile = st.session_state.get("terminology_profile_active", "")
+    if active_profile:
+        current = active_profile
         if current in profile_names:
             default_idx = profile_names.index(current)
-        elif current == "+ New profile":
-            default_idx = len(options) - 1
 
-    selected = st.selectbox("Terminology Profile", options=options, index=default_idx)
+    selected = st.selectbox("Terminology Profile / 术语档案", options=options, index=default_idx)
+    candidate_profile = ""
     if selected == "+ New profile":
-        new_name = st.text_input("New profile name")
+        new_name = st.text_input("New Profile Name / 新档案名称")
         if new_name.strip():
-            st.session_state["terminology_profile_name"] = new_name.strip()
+            candidate_profile = new_name.strip()
     else:
-        st.session_state["terminology_profile_name"] = selected
+        candidate_profile = selected
+
+    confirm_clicked = st.button("Confirm Profile / 确认档案", key="confirm_terminology_profile")
+    if confirm_clicked:
+        if not candidate_profile:
+            st.error("Please select an existing profile or input a new profile name first. / 请先选择已有档案或输入新档案名称。")
+        else:
+            st.session_state["terminology_profile_active"] = candidate_profile
+            st.session_state["terminology_profile_name"] = candidate_profile
+            st.success(f"Profile confirmed / 已确认档案: {candidate_profile}")
+
+    active_profile = st.session_state.get("terminology_profile_active", "").strip()
+    if active_profile:
+        st.info(f"Current profile / 当前档案: {active_profile}")
+    else:
+        st.warning("No profile confirmed yet. / 尚未确认档案。")
 
 def text_processing_section():
     st.header(t("b. Translate and Generate Subtitles"))
@@ -88,9 +108,9 @@ def process_text():
         _3_2_split_meaning.split_sentences_by_meaning()
     with st.spinner(t("Summarizing and translating...")):
         if _safe_load_key("streamlit_terminology_profile_select", True):
-            selected_profile = st.session_state.get("terminology_profile_name", "").strip()
+            selected_profile = st.session_state.get("terminology_profile_active", "").strip()
             if not selected_profile:
-                st.error("Please pick a terminology profile or input a new profile name first.")
+                st.error("Please confirm a terminology profile in the sidebar first. / 请先在侧边栏确认术语档案。")
                 st.stop()
             _4_1_summarize.set_selected_profile(selected_profile)
             _4_1_summarize.get_summary(interactive_select=False)
