@@ -20,6 +20,17 @@ Fork of [Huanshere/VideoLingo](https://github.com/Huanshere/VideoLingo) focused 
   - choose existing terminology profile
   - or create a new one by name
 - Added batch option to repick terminology profile for every video
+- Added Streamlit profile selector toggle + picker in sidebar (`streamlit_terminology_profile_select`)
+- Added automatic person-name extraction into `output/log/terminology.json` (names kept as original)
+
+### Local ASR backend updates (Apple Silicon ready)
+- Added platform-aware local backend selection:
+  - Apple Silicon (`darwin` + `arm64`) defaults to `openai_whisper` + `mps`
+  - Other platforms default to `whisperx`
+- Added configurable local backend and device:
+  - `whisper.local_backend`: `auto | whisperx | openai_whisper`
+  - `whisper.local_device`: `auto | cpu | cuda | mps`
+- Removed old pinned WhisperX git commit from dependencies
 
 ### Translation behavior updates
 - Updated prompts so person names default to original English (except globally well-known figures with established exonyms)
@@ -63,11 +74,14 @@ Key options introduced in this fork:
 - `asr_gap_recover_padding_seconds`
 - `asr_gap_recover_max_windows`
 - `batch_terminology_pick_each_video`
+- `streamlit_terminology_profile_select`
 - `terminology_max_terms`
+- `whisper.local_backend`
+- `whisper.local_device`
 
 Use `config.example.yaml` as the tracked template.
 
-## Terminology Profiles (CLI)
+## Terminology Profiles (CLI + Streamlit)
 
 When running in CLI/batch mode, summary stage can prompt:
 
@@ -79,6 +93,10 @@ Pick terminology json:
 ```
 
 Selected profile is reused in-process unless repick-per-video is enabled.
+
+In Streamlit mode, use the sidebar selector:
+- toggle: `Terminology profile selection`
+- choose an existing profile or create `+ New profile`
 
 ## License
 
