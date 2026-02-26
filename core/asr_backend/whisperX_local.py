@@ -50,6 +50,26 @@ def _resolve_local_backend():
             device = "cpu"
     return backend, device
 
+
+def _load_openai_whisper_model(model_name: str, device: str, download_root: str):
+    import whisper as openai_whisper
+
+    if device != "mps":
+        return openai_whisper.load_model(model_name, device=device, download_root=download_root), device
+
+    # Workaround for SparseMPS issue: load on CPU, densify sparse buffers, then move to MPS.
+    model = openai_whisper.load_model(model_name, device="cpu", download_root=download_root)
+    try:
+        if hasattr(model, "alignment_heads"):
+            ah = model.alignment_heads
+            if isinstance(ah, torch.Tensor) and ah.is_sparse:
+                model.alignment_heads = ah.to_dense()
+        model = model.to("mps")
+        return model, "mps"
+    except Exception as e:
+        rprint(f"[yellow]⚠️ Failed to move OpenAI Whisper model to MPS ({e}); fallback to CPU.[/yellow]")
+        return model, "cpu"
+
 @except_handler("failed to check hf mirror", default_return=None)
 def check_hf_mirror():
     mirrors = {'Official': 'huggingface.co', 'Mirror': 'hf-mirror.com'}
@@ -143,13 +163,18 @@ def transcribe_audio(raw_audio_file, vocal_audio_file, start, end):
         )
         result = model.transcribe(raw_audio_segment, batch_size=batch_size, print_progress=True)
     else:
-        import whisper as openai_whisper
-        model = openai_whisper.load_model(model_name, device=device, download_root=MODEL_DIR)
+        model, runtime_device = _load_openai_whisper_model(model_name, device, MODEL_DIR)
+        if runtime_device != device:
+            device = runtime_device
+            if device == "cpu":
+                batch_size = 1
+                compute_type = "int8"
         result = model.transcribe(
             raw_audio_segment,
             language=whisper_language,
             word_timestamps=False,
-            verbose=True
+            verbose=True,
+            fp16=(device == "mps")
         )
         result = {
             "language": result.get("language", whisper_language or "en"),
