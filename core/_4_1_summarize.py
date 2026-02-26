@@ -4,7 +4,7 @@ import re
 import sys
 from collections import Counter
 from pathlib import Path
-from core.prompts import get_summary_prompt
+from core.prompts import get_summary_prompt, get_person_name_filter_prompt
 import pandas as pd
 from core.utils import *
 from core.utils.models import _3_2_SPLIT_BY_MEANING, _4_1_TERMINOLOGY
@@ -156,13 +156,10 @@ def _load_custom_terms():
         ]
     )
 
-def _extract_person_name_terms(text: str):
-    """
-    Heuristic extraction of person-name-like phrases from source text.
-    Names are kept in original form to avoid mistranslation.
-    """
+def _extract_person_name_candidates(text: str):
+    """Heuristic candidate recall for person-like names (high recall, low precision)."""
     if not text:
-        return []
+        return [], set()
 
     stopwords = {
         "The", "This", "That", "These", "Those", "And", "But", "So", "In", "On", "At",
@@ -184,6 +181,7 @@ def _extract_person_name_terms(text: str):
     single_name_pattern = re.compile(rf"\b{token}\b")
 
     candidates = []
+    high_conf = set()
 
     for pattern in (titled_name_pattern, full_name_pattern):
         for m in pattern.finditer(text):
@@ -192,6 +190,7 @@ def _extract_person_name_terms(text: str):
             if first in stopwords:
                 continue
             candidates.append(name)
+            high_conf.add(name.lower())
 
     singles = [m.group(0).strip() for m in single_name_pattern.finditer(text)]
     single_counts = Counter(s for s in singles if s and s not in stopwords)
@@ -199,17 +198,58 @@ def _extract_person_name_terms(text: str):
         # Include repeated single-token names (common in creator/game reviews).
         if count >= 2 and len(name) >= 3:
             candidates.append(name)
+            if count >= 4:
+                high_conf.add(name.lower())
 
-    return _normalize_terms(
-        [
-            {
-                "src": name,
-                "tgt": name,
-                "note": "Person name (auto-extracted, keep original)"
-            }
-            for name in candidates
-        ]
-    )
+    normalized_names = [term["src"] for term in _normalize_terms([{"src": n, "tgt": "", "note": ""} for n in candidates])]
+    return normalized_names, high_conf
+
+
+def _filter_person_names_with_llm(source_text: str, candidates, high_conf):
+    """LLM-based strict filtering to reduce false positives in name extraction."""
+    if not candidates:
+        return []
+
+    max_candidates = 120
+    candidates = candidates[:max_candidates]
+    prompt_text = source_text[:12000]
+    filter_prompt = get_person_name_filter_prompt(prompt_text, candidates)
+
+    def valid_name_filter(resp):
+        if not isinstance(resp, dict) or "names" not in resp:
+            return {"status": "error", "message": "Invalid name filter response format"}
+        if not isinstance(resp["names"], list):
+            return {"status": "error", "message": "Invalid `names` type"}
+        return {"status": "success", "message": "ok"}
+
+    try:
+        filtered = ask_gpt(
+            filter_prompt,
+            resp_type="json",
+            valid_def=valid_name_filter,
+            log_title="person_name_filter",
+        )
+        keep_set = {str(x).strip() for x in filtered.get("names", []) if str(x).strip()}
+        keep_set = {x for x in keep_set if x in set(candidates)}
+    except Exception as e:
+        rprint(f"[yellow]⚠️ Person-name LLM filter failed, fallback to conservative heuristic: {e}[/yellow]")
+        keep_set = {name for name in candidates if name.lower() in high_conf}
+
+    terms = [
+        {
+            "src": name,
+            "tgt": name,
+            "note": "Person name (LLM-filtered, keep original)"
+        }
+        for name in candidates
+        if name in keep_set
+    ]
+    return _normalize_terms(terms)
+
+
+def _extract_person_name_terms(text: str):
+    candidates, high_conf = _extract_person_name_candidates(text)
+    return _filter_person_names_with_llm(text, candidates, high_conf)
 
 def search_things_to_note_in_prompt(sentence):
     """Search for terms to note in the given sentence"""

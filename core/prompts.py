@@ -125,6 +125,41 @@ Note: Start you answer with ```json and end with ```, do not add any other text.
 """.strip()
     return summary_prompt
 
+
+def get_person_name_filter_prompt(source_content, candidates):
+    candidates_json = json.dumps(candidates, ensure_ascii=False, indent=2)
+    prompt = f"""
+## Role
+You are an entity classifier specialized in subtitle text.
+
+## Task
+Given subtitle content and candidate terms, keep ONLY personal names.
+
+Rules:
+1. Keep only real person names (individual humans), including creators, speakers, historical figures, and fictional character person names.
+2. Remove organizations, products, game titles, places, months/weekdays, generic nouns, and style words.
+3. Keep the exact original candidate string; do not rewrite.
+4. Be strict. If uncertain, exclude it.
+5. Return at most 120 names.
+
+## INPUT
+<source_text>
+{source_content}
+</source_text>
+
+<candidates>
+{candidates_json}
+</candidates>
+
+## Output in only JSON format and no other text
+{{
+  "names": ["name1", "name2"]
+}}
+
+Note: Start you answer with ```json and end with ```, do not add any other text.
+""".strip()
+    return prompt
+
 ## ================================================================
 # @ step5_translate.py & translate_lines.py
 def generate_shared_prompt(previous_content_prompt, after_content_prompt, summary_prompt, things_to_note_prompt):

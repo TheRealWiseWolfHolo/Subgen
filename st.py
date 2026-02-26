@@ -1,7 +1,16 @@
 import streamlit as st
 import os, sys
+import threading
 from core.st_utils.imports_and_utils import *
 from core import *
+from core.utils.translation_confirm import (
+    approve_translation_confirmation,
+    clear_translation_confirmation,
+    consume_translation_confirmation,
+    is_translation_confirmation_pending,
+    is_translation_confirmed,
+    set_translation_confirmation_pending,
+)
 
 # SET PATH
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -72,6 +81,42 @@ def render_terminology_profile_selector():
     else:
         st.warning("No profile confirmed yet. / 尚未确认档案。")
 
+
+def _start_terminal_confirmation_listener_once():
+    if not sys.stdin.isatty():
+        return
+    if st.session_state.get("terminal_confirm_listener_started"):
+        return
+
+    def _worker():
+        try:
+            input(
+                "⚠️ PAUSE_BEFORE_TRANSLATE: review output/log/terminology.json. "
+                "Press ENTER here to continue (or confirm in Streamlit)."
+            )
+            if is_translation_confirmation_pending():
+                approve_translation_confirmation("terminal")
+        except EOFError:
+            return
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    st.session_state["terminal_confirm_listener_started"] = True
+
+
+def continue_text_after_confirmation():
+    _4_2_translate.translate_all()
+    with st.spinner(t("Processing and aligning subtitles...")):
+        _5_split_sub.split_for_sub_main()
+        _6_gen_sub.align_timestamp_main()
+    with st.spinner(t("Merging subtitles to video...")):
+        _7_sub_into_vid.merge_subtitles_to_video()
+    st.session_state["awaiting_translate_confirmation"] = False
+    st.session_state["terminal_confirm_listener_started"] = False
+    clear_translation_confirmation()
+    st.success(t("Subtitle processing complete! 🎉"))
+    st.balloons()
+
 def text_processing_section():
     st.header(t("b. Translate and Generate Subtitles"))
     with st.container(border=True):
@@ -86,6 +131,18 @@ def text_processing_section():
             5. {t("Generating timeline and subtitles")}<br>
             6. {t("Merging subtitles into the video")}
         """, unsafe_allow_html=True)
+        if st.session_state.get("awaiting_translate_confirmation", False) or is_translation_confirmation_pending():
+            st.warning("Waiting for translation confirmation / 等待翻译确认")
+            st.caption("Confirm in Streamlit below, or press ENTER in terminal. / 你可以在下方确认，或在终端按回车确认。")
+            if st.button("Continue Translation / 继续翻译", key="continue_translation_button"):
+                approve_translation_confirmation("streamlit")
+            if is_translation_confirmed():
+                consume_translation_confirmation()
+                with st.spinner(t("Translating...")):
+                    continue_text_after_confirmation()
+                st.rerun()
+            return
+
         if not os.path.exists(SUB_VIDEO):
             if st.button(t("Start Processing Subtitles"), key="text_processing_button"):
                 process_text()
@@ -118,16 +175,15 @@ def process_text():
             _4_1_summarize.reset_selected_profile()
             _4_1_summarize.get_summary(interactive_select=False)
         if load_key("pause_before_translate"):
-            st.info(t("PAUSE_BEFORE_TRANSLATE is enabled. In Streamlit mode, please review `output/log/terminology.json` after this run."))
-        _4_2_translate.translate_all()
-    with st.spinner(t("Processing and aligning subtitles...")): 
-        _5_split_sub.split_for_sub_main()
-        _6_gen_sub.align_timestamp_main()
-    with st.spinner(t("Merging subtitles to video...")):
-        _7_sub_into_vid.merge_subtitles_to_video()
-    
-    st.success(t("Subtitle processing complete! 🎉"))
-    st.balloons()
+            set_translation_confirmation_pending()
+            st.session_state["awaiting_translate_confirmation"] = True
+            _start_terminal_confirmation_listener_once()
+            st.info(
+                "PAUSE_BEFORE_TRANSLATE is enabled. Please review output/log/terminology.json and confirm in Streamlit or terminal."
+            )
+            return
+        with st.spinner(t("Translating...")):
+            continue_text_after_confirmation()
 
 def audio_processing_section():
     st.header(t("c. Dubbing"))

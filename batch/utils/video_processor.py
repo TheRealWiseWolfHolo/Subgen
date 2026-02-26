@@ -2,6 +2,7 @@ import os
 from core.st_utils.imports_and_utils import *
 from core.utils.onekeycleanup import cleanup
 from core.utils import load_key
+from core.utils.translation_confirm import wait_for_translation_confirmation_cli
 import shutil
 from functools import partial
 from rich.panel import Panel
@@ -100,7 +101,9 @@ def summarize_and_translate():
         _4_1_summarize.get_summary()
 
     if load_key("pause_before_translate"):
-        input("⚠️ PAUSE_BEFORE_TRANSLATE is enabled. Review output/log/terminology.json, then press ENTER to continue...")
+        wait_for_translation_confirmation_cli(
+            "⚠️ PAUSE_BEFORE_TRANSLATE is enabled. Review output/log/terminology.json, then press ENTER to continue..."
+        )
     _4_2_translate.translate_all()
 
 def process_and_align_subtitles():
