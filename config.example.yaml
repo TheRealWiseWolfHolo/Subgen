@@ -66,7 +66,7 @@ subtitle:
 # *Summary length, set low to 2k if using local LLM
 summary_length: 16000
 # *Maximum terms to extract in terminology summary stage
-terminology_max_terms: 40
+terminology_max_terms: 100
 
 # *Maximum number of words for the first rough cut, below 18 will cut too finely affecting translation, above 22 is too long and will make subsequent subtitle splitting difficult to align
 max_split_length: 22

@@ -81,10 +81,11 @@ Steps:
    - Write two sentences: first for main topic, second for key point
 2. Term Extraction:
    - Mark professional terms and names (excluding those listed in Existing Terms)
+   - Prefer high recall: include technical terms, product names, organization names, game/system names, character names, and jargon phrases when they are context-relevant
    - Provide {tgt_lang} translation or keep original
    - For person names: keep the original English name by default; only use a {tgt_lang} translated name for globally well-known public figures with widely established {tgt_lang} exonyms
    - Add brief explanation
-   - Extract up to {max_terms} terms
+   - Extract up to {max_terms} terms, favor richer coverage than conservative extraction, but do not force filling close to the upper limit
 
 ## INPUT
 <text>
