@@ -59,6 +59,7 @@ _backup/
 *.m4a
 
 # Local config and secrets
+config.yaml
 config.local.py
 config_hide.py
 config.backup.yaml

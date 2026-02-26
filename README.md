@@ -105,7 +105,13 @@ conda activate videolingo
 python install.py
 ```
 
-3. Start the application
+3. Create your local config and fill in API keys
+
+```bash
+cp config.example.yaml config.yaml
+```
+
+4. Start the application
 
 ```bash
 streamlit run st.py
