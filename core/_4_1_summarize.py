@@ -1,6 +1,8 @@
 import json
 import os
+import re
 import sys
+from collections import Counter
 from pathlib import Path
 from core.prompts import get_summary_prompt
 import pandas as pd
@@ -16,13 +18,15 @@ def reset_selected_profile():
     global _SELECTED_PROFILE_PATH
     _SELECTED_PROFILE_PATH = None
 
-def combine_chunks():
+def combine_chunks(limit=None):
     """Combine the text chunks identified by whisper into a single long text"""
     with open(_3_2_SPLIT_BY_MEANING, 'r', encoding='utf-8') as file:
         sentences = file.readlines()
     cleaned_sentences = [line.strip() for line in sentences]
     combined_text = ' '.join(cleaned_sentences)
-    return combined_text[:load_key('summary_length')]  #! Return only the first x characters
+    if limit is None:
+        return combined_text
+    return combined_text[:limit]
 
 def _normalize_terms(terms):
     normalized = []
@@ -78,6 +82,10 @@ def _list_profiles():
     TERMINOLOGY_LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
     return sorted(TERMINOLOGY_LIBRARY_DIR.glob("*.json"))
 
+def list_terminology_profile_names():
+    """List available terminology profile names without extension."""
+    return [p.stem for p in _list_profiles()]
+
 def _name_to_profile_path(name: str) -> Path:
     normalized = str(name).strip().replace("/", "_").replace("\\", "_")
     if not normalized:
@@ -85,6 +93,15 @@ def _name_to_profile_path(name: str) -> Path:
     if not normalized.endswith(".json"):
         normalized += ".json"
     return TERMINOLOGY_LIBRARY_DIR / normalized
+
+def set_selected_profile(profile_name: str):
+    """Select (and create if missing) a terminology profile by name."""
+    global _SELECTED_PROFILE_PATH
+    profile_path = _name_to_profile_path(profile_name)
+    if not profile_path.exists():
+        _save_profile_terms(profile_path, [])
+    _SELECTED_PROFILE_PATH = profile_path
+    return _SELECTED_PROFILE_PATH
 
 def _pick_terminology_profile_cli() -> Path:
     while True:
@@ -95,7 +112,15 @@ def _pick_terminology_profile_cli() -> Path:
         new_idx = len(profiles) + 1
         print(f"{new_idx}. New (Please name)")
 
-        choice_raw = input("User: ").strip()
+        try:
+            choice_raw = input("User: ").strip()
+        except EOFError:
+            # Non-interactive stdin fallback
+            default_profile = _name_to_profile_path("default")
+            if not default_profile.exists():
+                _save_profile_terms(default_profile, [])
+            print(f"No interactive input available, fallback to profile: {default_profile.stem}")
+            return default_profile
         if not choice_raw.isdigit():
             print("Please enter a valid number.")
             continue
@@ -131,6 +156,61 @@ def _load_custom_terms():
         ]
     )
 
+def _extract_person_name_terms(text: str):
+    """
+    Heuristic extraction of person-name-like phrases from source text.
+    Names are kept in original form to avoid mistranslation.
+    """
+    if not text:
+        return []
+
+    stopwords = {
+        "The", "This", "That", "These", "Those", "And", "But", "So", "In", "On", "At",
+        "Of", "To", "For", "From", "With", "Without", "It", "Its", "You", "We", "They",
+        "He", "She", "I", "A", "An", "As", "By", "Or", "If", "When", "While", "Then",
+        "However", "Therefore", "Meanwhile", "Anyway", "Also", "Because", "What", "Who",
+        "How", "Where", "Why", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
+        "Saturday", "Sunday", "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    }
+    token = r"[A-Z][a-z]+(?:['-][A-Z]?[a-z]+)?"
+    surname_particles = r"(?:[Vv]an|[Vv]on|[Dd]e|[Dd]el|[Dd]a|[Dd]i|[Ll]a|[Ll]e|[Aa]l|[Bb]in)"
+    full_name_pattern = re.compile(
+        rf"\b{token}(?:\s+(?:{surname_particles}\s+)?{token}){{1,3}}\b"
+    )
+    titled_name_pattern = re.compile(
+        rf"\b(?:Mr|Mrs|Ms|Dr|Prof)\.?\s+{token}(?:\s+{token}){{0,2}}\b"
+    )
+    single_name_pattern = re.compile(rf"\b{token}\b")
+
+    candidates = []
+
+    for pattern in (titled_name_pattern, full_name_pattern):
+        for m in pattern.finditer(text):
+            name = re.sub(r"\s+", " ", m.group(0)).strip()
+            first = name.replace(".", "").split()[0]
+            if first in stopwords:
+                continue
+            candidates.append(name)
+
+    singles = [m.group(0).strip() for m in single_name_pattern.finditer(text)]
+    single_counts = Counter(s for s in singles if s and s not in stopwords)
+    for name, count in single_counts.items():
+        # Include repeated single-token names (common in creator/game reviews).
+        if count >= 2 and len(name) >= 3:
+            candidates.append(name)
+
+    return _normalize_terms(
+        [
+            {
+                "src": name,
+                "tgt": name,
+                "note": "Person name (auto-extracted, keep original)"
+            }
+            for name in candidates
+        ]
+    )
+
 def search_things_to_note_in_prompt(sentence):
     """Search for terms to note in the given sentence"""
     with open(_4_1_TERMINOLOGY, 'r', encoding='utf-8') as file:
@@ -149,7 +229,8 @@ def search_things_to_note_in_prompt(sentence):
 
 def get_summary(interactive_select=None):
     global _SELECTED_PROFILE_PATH
-    src_content = combine_chunks()
+    full_content = combine_chunks(limit=None)
+    src_content = combine_chunks(limit=load_key('summary_length'))
     if interactive_select is None:
         interactive_select = sys.stdin.isatty()
 
@@ -158,7 +239,8 @@ def get_summary(interactive_select=None):
 
     profile_terms = _load_profile_terms(_SELECTED_PROFILE_PATH) if _SELECTED_PROFILE_PATH else []
     custom_terms = _load_custom_terms()
-    existing_terms = _merge_terms(profile_terms, custom_terms)
+    person_name_terms = _extract_person_name_terms(full_content)
+    existing_terms = _merge_terms(profile_terms, custom_terms, person_name_terms)
 
     if custom_terms:
         rprint(f"📖 Custom Terms Loaded: {len(custom_terms)} terms")
@@ -179,7 +261,7 @@ def get_summary(interactive_select=None):
 
     summary = ask_gpt(summary_prompt, resp_type='json', valid_def=valid_summary, log_title='summary')
     summary_terms = _normalize_terms(summary.get("terms", []))
-    merged_terms = _merge_terms(profile_terms, summary_terms, custom_terms)
+    merged_terms = _merge_terms(profile_terms, summary_terms, custom_terms, person_name_terms)
     summary_output = {
         "theme": summary.get("theme", ""),
         "terms": merged_terms
@@ -190,7 +272,7 @@ def get_summary(interactive_select=None):
 
     rprint(f'💾 Summary log saved to → `{_4_1_TERMINOLOGY}`')
     if _SELECTED_PROFILE_PATH:
-        _save_profile_terms(_SELECTED_PROFILE_PATH, _merge_terms(profile_terms, summary_terms))
+        _save_profile_terms(_SELECTED_PROFILE_PATH, _merge_terms(profile_terms, summary_terms, person_name_terms))
 
 if __name__ == '__main__':
     get_summary(interactive_select=True)

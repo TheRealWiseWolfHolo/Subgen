@@ -1,5 +1,4 @@
 import os
-import sys
 from core.st_utils.imports_and_utils import *
 from core.utils.onekeycleanup import cleanup
 from core.utils import load_key
@@ -95,15 +94,8 @@ def split_sentences():
 def summarize_and_translate():
     repick_each_video = load_key("batch_terminology_pick_each_video")
     if repick_each_video:
-        if sys.stdin.isatty():
-            _4_1_summarize.reset_selected_profile()
-            _4_1_summarize.get_summary(interactive_select=True)
-        else:
-            console.print(Panel(
-                "[yellow]batch_terminology_pick_each_video=true but stdin is non-interactive; using current/default profile.[/yellow]",
-                border_style="yellow"
-            ))
-            _4_1_summarize.get_summary(interactive_select=False)
+        _4_1_summarize.reset_selected_profile()
+        _4_1_summarize.get_summary(interactive_select=True)
     else:
         _4_1_summarize.get_summary()
 

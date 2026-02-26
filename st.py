@@ -13,6 +13,45 @@ st.set_page_config(page_title="VideoLingo", page_icon="docs/logo.svg")
 SUB_VIDEO = "output/output_sub.mp4"
 DUB_VIDEO = "output/output_dub.mp4"
 
+def _safe_load_key(key, default):
+    try:
+        return load_key(key)
+    except Exception:
+        return default
+
+def render_terminology_profile_selector():
+    enabled_cfg = _safe_load_key("streamlit_terminology_profile_select", True)
+    enabled = st.toggle(
+        "Terminology profile selection",
+        value=enabled_cfg,
+        help="Enable selecting/creating a terminology profile before summary extraction."
+    )
+    if enabled != enabled_cfg:
+        update_key("streamlit_terminology_profile_select", enabled)
+        st.rerun()
+
+    if not enabled:
+        st.session_state.pop("terminology_profile_name", None)
+        return
+
+    profile_names = _4_1_summarize.list_terminology_profile_names()
+    options = profile_names + ["+ New profile"]
+    default_idx = 0
+    if "terminology_profile_name" in st.session_state:
+        current = st.session_state["terminology_profile_name"]
+        if current in profile_names:
+            default_idx = profile_names.index(current)
+        elif current == "+ New profile":
+            default_idx = len(options) - 1
+
+    selected = st.selectbox("Terminology Profile", options=options, index=default_idx)
+    if selected == "+ New profile":
+        new_name = st.text_input("New profile name")
+        if new_name.strip():
+            st.session_state["terminology_profile_name"] = new_name.strip()
+    else:
+        st.session_state["terminology_profile_name"] = selected
+
 def text_processing_section():
     st.header(t("b. Translate and Generate Subtitles"))
     with st.container(border=True):
@@ -27,7 +66,6 @@ def text_processing_section():
             5. {t("Generating timeline and subtitles")}<br>
             6. {t("Merging subtitles into the video")}
         """, unsafe_allow_html=True)
-
         if not os.path.exists(SUB_VIDEO):
             if st.button(t("Start Processing Subtitles"), key="text_processing_button"):
                 process_text()
@@ -49,9 +87,18 @@ def process_text():
         _3_1_split_nlp.split_by_spacy()
         _3_2_split_meaning.split_sentences_by_meaning()
     with st.spinner(t("Summarizing and translating...")):
-        _4_1_summarize.get_summary(interactive_select=False)
+        if _safe_load_key("streamlit_terminology_profile_select", True):
+            selected_profile = st.session_state.get("terminology_profile_name", "").strip()
+            if not selected_profile:
+                st.error("Please pick a terminology profile or input a new profile name first.")
+                st.stop()
+            _4_1_summarize.set_selected_profile(selected_profile)
+            _4_1_summarize.get_summary(interactive_select=False)
+        else:
+            _4_1_summarize.reset_selected_profile()
+            _4_1_summarize.get_summary(interactive_select=False)
         if load_key("pause_before_translate"):
-            input(t("⚠️ PAUSE_BEFORE_TRANSLATE. Go to `output/log/terminology.json` to edit terminology. Then press ENTER to continue..."))
+            st.info(t("PAUSE_BEFORE_TRANSLATE is enabled. In Streamlit mode, please review `output/log/terminology.json` after this run."))
         _4_2_translate.translate_all()
     with st.spinner(t("Processing and aligning subtitles...")): 
         _5_split_sub.split_for_sub_main()
@@ -115,6 +162,8 @@ def main():
     # add settings
     with st.sidebar:
         page_setting()
+        st.markdown("---")
+        render_terminology_profile_selector()
         st.markdown(give_star_button, unsafe_allow_html=True)
     download_video_section()
     text_processing_section()

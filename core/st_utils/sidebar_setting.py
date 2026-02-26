@@ -3,6 +3,12 @@ from translations.translations import translate as t
 from translations.translations import DISPLAY_LANGUAGES
 from core.utils import *
 
+def _safe_load_key(key, default):
+    try:
+        return load_key(key)
+    except Exception:
+        return default
+
 def config_input(label, key, help=None):
     """Generic config input handler"""
     val = st.text_input(label, value=load_key(key), help=help)
@@ -63,6 +69,33 @@ def page_setting():
         if runtime != load_key("whisper.runtime"):
             update_key("whisper.runtime", runtime)
             st.rerun()
+        if runtime == "local":
+            backend_options = ["auto", "whisperx", "openai_whisper"]
+            current_local_backend = _safe_load_key("whisper.local_backend", "auto")
+            if current_local_backend not in backend_options:
+                current_local_backend = "auto"
+            local_backend = st.selectbox(
+                "Local ASR Backend",
+                options=backend_options,
+                index=backend_options.index(current_local_backend),
+                help="auto: Apple Silicon uses openai_whisper, other platforms use whisperx"
+            )
+            if local_backend != current_local_backend:
+                update_key("whisper.local_backend", local_backend)
+                st.rerun()
+
+            device_options = ["auto", "cpu", "cuda", "mps"]
+            current_local_device = _safe_load_key("whisper.local_device", "auto")
+            if current_local_device not in device_options:
+                current_local_device = "auto"
+            local_device = st.selectbox(
+                "Local ASR Device",
+                options=device_options,
+                index=device_options.index(current_local_device)
+            )
+            if local_device != current_local_device:
+                update_key("whisper.local_device", local_device)
+                st.rerun()
         if runtime == "cloud":
             config_input(t("WhisperX 302ai API"), "whisper.whisperX_302_api_key")
         if runtime == "elevenlabs":
