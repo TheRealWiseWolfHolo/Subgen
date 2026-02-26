@@ -11,7 +11,7 @@ display_language: "zh-CN"
 
 # API settings
 api:
-  key: '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'
+  key: 'YOUR-KEY-HERE'
   base_url: 'https://openrouter.ai/api/v1'
   model: 'google/gemini-3-flash-preview'
   llm_support_json: false
