@@ -13,6 +13,12 @@ CUSTOM_TERMS_PATH = 'custom_terms.xlsx'
 TERMINOLOGY_LIBRARY_DIR = Path("history/terminology_profiles")
 _SELECTED_PROFILE_PATH = None
 
+def _safe_load_key(key, default):
+    try:
+        return load_key(key)
+    except Exception:
+        return default
+
 def reset_selected_profile():
     """Reset cached terminology profile selection in current process."""
     global _SELECTED_PROFILE_PATH
@@ -55,28 +61,85 @@ def _merge_terms(*term_lists):
             merged.append(term)
     return merged
 
-def _load_profile_terms(profile_path: Path):
+def _normalize_frequency_map(freq_map):
+    normalized = {}
+    if not isinstance(freq_map, dict):
+        return normalized
+    for k, v in freq_map.items():
+        key = str(k).strip().lower()
+        if not key:
+            continue
+        try:
+            count = int(v)
+        except Exception:
+            count = 0
+        if count > 0:
+            normalized[key] = count
+    return normalized
+
+def _load_profile(profile_path: Path):
     if not profile_path or not profile_path.exists():
-        return []
+        return [], {}
     try:
         with open(profile_path, "r", encoding="utf-8") as f:
             payload = json.load(f)
         if isinstance(payload, dict):
-            return _normalize_terms(payload.get("terms", []))
+            terms = _normalize_terms(payload.get("terms", []))
+            freq_map = _normalize_frequency_map(payload.get("term_frequency", {}))
+            return terms, freq_map
         if isinstance(payload, list):
-            return _normalize_terms(payload)
-        return []
+            return _normalize_terms(payload), {}
+        return [], {}
     except Exception as e:
         rprint(f"[yellow]⚠️ Failed to load terminology profile `{profile_path}`: {e}[/yellow]")
-        return []
+        return [], {}
 
-def _save_profile_terms(profile_path: Path, terms):
+def _save_profile_terms(profile_path: Path, terms, term_frequency=None):
     if not profile_path:
         return
     profile_path.parent.mkdir(parents=True, exist_ok=True)
     with open(profile_path, "w", encoding="utf-8") as f:
-        json.dump({"terms": _normalize_terms(terms)}, f, ensure_ascii=False, indent=4)
+        json.dump(
+            {
+                "terms": _normalize_terms(terms),
+                "term_frequency": _normalize_frequency_map(term_frequency or {}),
+            },
+            f,
+            ensure_ascii=False,
+            indent=4,
+        )
     rprint(f"💾 Terminology profile saved to → `{profile_path}`")
+
+def _bump_term_frequency(freq_map, terms):
+    freq = _normalize_frequency_map(freq_map)
+    for term in _normalize_terms(terms):
+        key = term["src"].lower()
+        if not key:
+            continue
+        freq[key] = freq.get(key, 0) + 1
+    return freq
+
+def _prune_terms_by_frequency(terms, freq_map, keep_top_n):
+    if keep_top_n <= 0:
+        return _normalize_terms(terms), _normalize_frequency_map(freq_map)
+
+    terms = _normalize_terms(terms)
+    if len(terms) <= keep_top_n:
+        return terms, _normalize_frequency_map(freq_map)
+
+    freq = _normalize_frequency_map(freq_map)
+    sorted_terms = sorted(
+        terms,
+        key=lambda t: (-freq.get(t["src"].lower(), 0), t["src"].lower())
+    )
+    kept_terms = sorted_terms[:keep_top_n]
+    kept_keys = {t["src"].lower() for t in kept_terms}
+    kept_freq = {k: freq.get(k, 0) for k in kept_keys if freq.get(k, 0) > 0}
+    rprint(
+        f"[cyan]🧹 Pruned terminology profile to top {keep_top_n} terms by frequency "
+        f"({len(terms)} -> {len(kept_terms)}).[/cyan]"
+    )
+    return kept_terms, kept_freq
 
 def _list_profiles():
     TERMINOLOGY_LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
@@ -277,7 +340,7 @@ def get_summary(interactive_select=None):
     if interactive_select and _SELECTED_PROFILE_PATH is None:
         _SELECTED_PROFILE_PATH = _pick_terminology_profile_cli()
 
-    profile_terms = _load_profile_terms(_SELECTED_PROFILE_PATH) if _SELECTED_PROFILE_PATH else []
+    profile_terms, profile_freq = _load_profile(_SELECTED_PROFILE_PATH) if _SELECTED_PROFILE_PATH else ([], {})
     custom_terms = _load_custom_terms()
     person_name_terms = _extract_person_name_terms(full_content)
     existing_terms = _merge_terms(profile_terms, custom_terms, person_name_terms)
@@ -312,7 +375,13 @@ def get_summary(interactive_select=None):
 
     rprint(f'💾 Summary log saved to → `{_4_1_TERMINOLOGY}`')
     if _SELECTED_PROFILE_PATH:
-        _save_profile_terms(_SELECTED_PROFILE_PATH, _merge_terms(profile_terms, summary_terms, person_name_terms))
+        merged_profile_terms = _merge_terms(profile_terms, summary_terms, person_name_terms)
+        updated_profile_freq = _bump_term_frequency(profile_freq, summary_terms + person_name_terms)
+        keep_top_n = int(_safe_load_key("terminology_profile_keep_top_n", 0))
+        merged_profile_terms, updated_profile_freq = _prune_terms_by_frequency(
+            merged_profile_terms, updated_profile_freq, keep_top_n
+        )
+        _save_profile_terms(_SELECTED_PROFILE_PATH, merged_profile_terms, updated_profile_freq)
 
 if __name__ == '__main__':
     get_summary(interactive_select=True)

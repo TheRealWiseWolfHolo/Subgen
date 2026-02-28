@@ -125,6 +125,7 @@ def get_sentence_timestamps(df_words, df_sentences):
     current_pos = 0
     prev_end_time = None
     prev_end_word_idx = 0
+    fallback_count = 0
     for idx, sentence in df_sentences['Source'].items():
         clean_sentence = remove_punctuation(sentence.lower()).replace(" ", "")
         sentence_len = len(clean_sentence)
@@ -172,8 +173,50 @@ def get_sentence_timestamps(df_words, df_sentences):
             show_difference(clean_sentence, 
                           full_words_str[current_pos:current_pos+len(clean_sentence)])
             print("\nOriginal sentence:", df_sentences['Source'][idx])
-            raise ValueError("❎ No match found for sentence.")
+            # Try a wider fuzzy rematch before giving up.
+            wide_fuzzy = find_local_fuzzy_match(
+                df_words=df_words,
+                clean_words=clean_words,
+                sentence=clean_sentence,
+                start_word_idx=max(prev_end_word_idx, 0),
+                lookahead_words=420,
+                max_sentence_words=120,
+                min_ratio=0.72,
+            )
+            if wide_fuzzy is not None:
+                fuzzy_start_time, fuzzy_end_time, fuzzy_s_idx, fuzzy_e_idx, score = wide_fuzzy
+                print(
+                    f"⚠️ No exact match, using wide fuzzy rematch "
+                    f"(score={score:.3f}, words={fuzzy_s_idx}-{fuzzy_e_idx})."
+                )
+                time_stamp_list.append((fuzzy_start_time, fuzzy_end_time))
+                prev_end_time = fuzzy_end_time
+                prev_end_word_idx = fuzzy_e_idx
+                current_pos = max(current_pos, word_end_char_pos[fuzzy_e_idx] + 1)
+                continue
+
+            # Final fallback: keep timeline monotonic and estimate a short duration.
+            fallback_count += 1
+            est_words = max(1, len(str(sentence).split()))
+            start_word_idx = min(max(prev_end_word_idx + 1, 0), len(df_words) - 1)
+            end_word_idx = min(start_word_idx + est_words - 1, len(df_words) - 1)
+            fallback_start = float(df_words['start'][start_word_idx])
+            fallback_end = float(df_words['end'][end_word_idx])
+            if prev_end_time is not None and fallback_start < prev_end_time:
+                fallback_start = prev_end_time
+            if fallback_end <= fallback_start:
+                fallback_end = fallback_start + 0.35
+            print(
+                f"⚠️ Using timestamp fallback for unmatched sentence #{fallback_count}: "
+                f"{fallback_start:.3f}s -> {fallback_end:.3f}s"
+            )
+            time_stamp_list.append((fallback_start, fallback_end))
+            prev_end_time = fallback_end
+            prev_end_word_idx = end_word_idx
+            current_pos = max(current_pos, word_end_char_pos[end_word_idx] + 1)
     
+    if fallback_count:
+        console.print(f"[yellow]⚠️ Timestamp fallback used for {fallback_count} sentence(s).[/yellow]")
     return time_stamp_list
 
 def align_timestamp(df_text, df_translate, subtitle_output_configs: list, output_dir: str, for_display: bool = True):
