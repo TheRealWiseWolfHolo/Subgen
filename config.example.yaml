@@ -63,6 +63,11 @@ subtitle:
   # *Translated subtitles are slightly larger than source subtitles, affecting the reference length for subtitle splitting
   target_multiplier: 1.08
 
+# *Minimum subtitle block duration in milliseconds; blocks shorter than this are auto-adjusted/merged by timeline fixer
+subtitle_min_duration_ms: 100
+# *When merging short blocks, prefer at most this many lines (overflow falls back to space-separated text)
+subtitle_merge_max_lines: 2
+
 # *Summary length, set low to 2k if using local LLM
 summary_length: 16000
 # *Maximum terms to extract in terminology summary stage
