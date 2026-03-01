@@ -3,6 +3,7 @@ import platform
 import warnings
 import time
 import subprocess
+import re
 import numpy as np
 import torch
 import whisperx
@@ -94,6 +95,61 @@ def _is_mps_decode_nan_error(err: Exception) -> bool:
         or "found invalid values" in msg
         or "nan" in msg
     )
+
+
+def _tokenize_segment_text(text: str):
+    txt = str(text or "").strip()
+    if not txt:
+        return []
+    return [t for t in re.split(r"\s+", txt) if t]
+
+
+def _ensure_words_in_segments(segments):
+    """
+    Ensure each segment has usable `words` timestamps.
+    Fallback path for alignment edge cases (e.g. trellis length == 1).
+    """
+    fixed = []
+    for seg in segments or []:
+        if not isinstance(seg, dict):
+            continue
+        text = str(seg.get("text", "")).strip()
+        s = float(seg.get("start", 0.0) or 0.0)
+        e = float(seg.get("end", s) or s)
+        if e <= s:
+            e = s + 0.2
+
+        words = seg.get("words", [])
+        valid_words = []
+        if isinstance(words, list):
+            for w in words:
+                if not isinstance(w, dict):
+                    continue
+                token = str(w.get("word", "")).strip()
+                if not token:
+                    continue
+                ws = float(w.get("start", s) or s)
+                we = float(w.get("end", ws) or ws)
+                if we <= ws:
+                    we = ws + 0.02
+                valid_words.append({"word": token, "start": ws, "end": we})
+
+        if not valid_words:
+            tokens = _tokenize_segment_text(text)
+            if not tokens:
+                continue
+            step = (e - s) / max(1, len(tokens))
+            cur = s
+            for token in tokens:
+                nxt = cur + step
+                valid_words.append({"word": token, "start": cur, "end": nxt})
+                cur = nxt
+
+        seg["start"] = s
+        seg["end"] = e
+        seg["words"] = valid_words
+        fixed.append(seg)
+    return fixed
 
 @except_handler("failed to check hf mirror", default_return=None)
 def check_hf_mirror():
@@ -261,22 +317,37 @@ def transcribe_audio(raw_audio_file, vocal_audio_file, start, end):
     except Exception as e:
         if align_device != "cpu":
             rprint(f"[yellow]⚠️ Align on {align_device} failed ({e}), retrying on cpu...[/yellow]")
-            model_a, metadata = whisperx.load_align_model(language_code=result["language"], device="cpu")
-            result = whisperx.align(result["segments"], model_a, metadata, vocal_audio_segment, "cpu", return_char_alignments=False)
+            try:
+                model_a, metadata = whisperx.load_align_model(language_code=result["language"], device="cpu")
+                result = whisperx.align(result["segments"], model_a, metadata, vocal_audio_segment, "cpu", return_char_alignments=False)
+            except Exception as e_cpu:
+                rprint(
+                    f"[yellow]⚠️ Align on cpu also failed ({e_cpu}). "
+                    "Falling back to segment-level timestamps.[/yellow]"
+                )
+                result = {"segments": _ensure_words_in_segments(result.get("segments", []))}
         else:
-            raise
+            rprint(
+                f"[yellow]⚠️ Align failed on cpu ({e}). "
+                "Falling back to segment-level timestamps.[/yellow]"
+            )
+            result = {"segments": _ensure_words_in_segments(result.get("segments", []))}
     align_time = time.time() - align_start_time
     rprint(f"[cyan]⏱️ time align:[/cyan] {align_time:.2f}s")
 
     # Free GPU resources again
-    del model_a
+    if 'model_a' in locals():
+        del model_a
     _empty_cache(device)
+
+    # Ensure words exist even when alignment partially/fully failed.
+    result["segments"] = _ensure_words_in_segments(result.get("segments", []))
 
     # Adjust timestamps
     for segment in result['segments']:
         segment['start'] += start
         segment['end'] += start
-        for word in segment['words']:
+        for word in segment.get('words', []):
             if 'start' in word:
                 word['start'] += start
             if 'end' in word:
