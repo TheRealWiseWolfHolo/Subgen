@@ -4,7 +4,11 @@ import re
 import sys
 from collections import Counter
 from pathlib import Path
-from core.prompts import get_summary_prompt, get_person_name_filter_prompt
+from core.prompts import (
+    get_summary_prompt,
+    get_person_name_filter_prompt,
+    get_person_name_terminology_prompt,
+)
 import pandas as pd
 from core.utils import *
 from core.utils.models import _3_2_SPLIT_BY_MEANING, _4_1_TERMINOLOGY
@@ -298,21 +302,65 @@ def _filter_person_names_with_llm(source_text: str, candidates, high_conf):
         rprint(f"[yellow]⚠️ Person-name LLM filter failed, fallback to conservative heuristic: {e}[/yellow]")
         keep_set = {name for name in candidates if name.lower() in high_conf}
 
-    terms = [
-        {
-            "src": name,
-            "tgt": name,
-            "note": "Person name (LLM-filtered, keep original)"
-        }
-        for name in candidates
-        if name in keep_set
-    ]
+    terms = [{"src": name, "tgt": "", "note": "Person name (LLM-filtered)"} for name in candidates if name in keep_set]
     return _normalize_terms(terms)
 
 
 def _extract_person_name_terms(text: str):
     candidates, high_conf = _extract_person_name_candidates(text)
     return _filter_person_names_with_llm(text, candidates, high_conf)
+
+
+def _translate_person_name_terms_with_llm(source_text: str, person_terms, existing_terms):
+    person_terms = _normalize_terms(person_terms)
+    if not person_terms:
+        return []
+
+    existing_src_lower = {t["src"].lower() for t in _normalize_terms(existing_terms)}
+    person_names = [t["src"] for t in person_terms if t["src"].lower() not in existing_src_lower]
+    if not person_names:
+        return []
+
+    prompt_text = source_text[:12000]
+    existing_preview = _normalize_terms(existing_terms)[:200]
+    prompt = get_person_name_terminology_prompt(prompt_text, person_names, existing_preview)
+
+    def valid_person_terms(resp):
+        required_keys = {"src", "tgt", "note"}
+        if not isinstance(resp, dict) or "terms" not in resp:
+            return {"status": "error", "message": "Invalid response format"}
+        if not isinstance(resp["terms"], list):
+            return {"status": "error", "message": "Invalid `terms` type"}
+        for term in resp["terms"]:
+            if not isinstance(term, dict) or not all(k in term for k in required_keys):
+                return {"status": "error", "message": "Invalid person-term item format"}
+        return {"status": "success", "message": "ok"}
+
+    try:
+        resp = ask_gpt(
+            prompt,
+            resp_type="json",
+            valid_def=valid_person_terms,
+            log_title="person_name_terms",
+        )
+        llm_terms = _normalize_terms(resp.get("terms", []))
+    except Exception as e:
+        rprint(f"[yellow]⚠️ Person-name terminology translation failed, fallback to original names: {e}[/yellow]")
+        llm_terms = []
+
+    allowed_set = set(person_names)
+    cleaned = []
+    for t in llm_terms:
+        src = t["src"]
+        if src not in allowed_set:
+            continue
+        tgt = t["tgt"] or src
+        note = t["note"] or "Person name"
+        cleaned.append({"src": src, "tgt": tgt, "note": note})
+
+    if not cleaned:
+        cleaned = [{"src": n, "tgt": n, "note": "Person name (fallback keep original)"} for n in person_names]
+    return _normalize_terms(cleaned)
 
 def search_things_to_note_in_prompt(sentence):
     """Search for terms to note in the given sentence"""
@@ -343,7 +391,8 @@ def get_summary(interactive_select=None):
     profile_terms, profile_freq = _load_profile(_SELECTED_PROFILE_PATH) if _SELECTED_PROFILE_PATH else ([], {})
     custom_terms = _load_custom_terms()
     person_name_terms = _extract_person_name_terms(full_content)
-    existing_terms = _merge_terms(profile_terms, custom_terms, person_name_terms)
+    # Keep person names out of Existing Terms so they can still be translated by LLM terminology flow.
+    existing_terms = _merge_terms(profile_terms, custom_terms)
 
     if custom_terms:
         rprint(f"📖 Custom Terms Loaded: {len(custom_terms)} terms")
@@ -364,7 +413,10 @@ def get_summary(interactive_select=None):
 
     summary = ask_gpt(summary_prompt, resp_type='json', valid_def=valid_summary, log_title='summary')
     summary_terms = _normalize_terms(summary.get("terms", []))
-    merged_terms = _merge_terms(profile_terms, summary_terms, custom_terms, person_name_terms)
+    person_name_terms_translated = _translate_person_name_terms_with_llm(
+        full_content, person_name_terms, _merge_terms(profile_terms, custom_terms, summary_terms)
+    )
+    merged_terms = _merge_terms(profile_terms, summary_terms, custom_terms, person_name_terms_translated)
     summary_output = {
         "theme": summary.get("theme", ""),
         "terms": merged_terms
@@ -375,8 +427,8 @@ def get_summary(interactive_select=None):
 
     rprint(f'💾 Summary log saved to → `{_4_1_TERMINOLOGY}`')
     if _SELECTED_PROFILE_PATH:
-        merged_profile_terms = _merge_terms(profile_terms, summary_terms, person_name_terms)
-        updated_profile_freq = _bump_term_frequency(profile_freq, summary_terms + person_name_terms)
+        merged_profile_terms = _merge_terms(profile_terms, summary_terms, person_name_terms_translated)
+        updated_profile_freq = _bump_term_frequency(profile_freq, summary_terms + person_name_terms_translated)
         keep_top_n = int(_safe_load_key("terminology_profile_keep_top_n", 0))
         merged_profile_terms, updated_profile_freq = _prune_terms_by_frequency(
             merged_profile_terms, updated_profile_freq, keep_top_n

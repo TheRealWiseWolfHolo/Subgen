@@ -161,6 +161,57 @@ Note: Start you answer with ```json and end with ```, do not add any other text.
 """.strip()
     return prompt
 
+
+def get_person_name_terminology_prompt(source_content, person_names, existing_terms=None):
+    src_lang = load_key("whisper.detected_language")
+    tgt_lang = load_key("target_language")
+    names_json = json.dumps(person_names or [], ensure_ascii=False, indent=2)
+    existing_terms = existing_terms or []
+    existing_json = json.dumps(existing_terms, ensure_ascii=False, indent=2)
+    prompt = f"""
+## Role
+You are a terminology translator for subtitles.
+
+## Task
+For each candidate person name, output terminology entries with translation guidance in {tgt_lang}.
+
+Rules:
+1. Keep exactly the same `src` string as input candidate.
+2. For `tgt`, decide case-by-case:
+   - Use a common {tgt_lang} translated form when it is widely established and natural for audience.
+   - Otherwise keep original name.
+3. If the candidate is not a personal name after context check, exclude it.
+4. Keep note concise and practical for subtitle translation.
+5. Do not duplicate terms that already exist in Existing Terms by same `src` (case-insensitive).
+
+## INPUT
+<source_text>
+{source_content}
+</source_text>
+
+<person_name_candidates>
+{names_json}
+</person_name_candidates>
+
+<existing_terms>
+{existing_json}
+</existing_terms>
+
+## Output in only JSON format and no other text
+{{
+  "terms": [
+    {{
+      "src": "{src_lang} person name",
+      "tgt": "{tgt_lang} translation or original",
+      "note": "Short translation note"
+    }}
+  ]
+}}
+
+Note: Start you answer with ```json and end with ```, do not add any other text.
+""".strip()
+    return prompt
+
 ## ================================================================
 # @ step5_translate.py & translate_lines.py
 def generate_shared_prompt(previous_content_prompt, after_content_prompt, summary_prompt, things_to_note_prompt):
