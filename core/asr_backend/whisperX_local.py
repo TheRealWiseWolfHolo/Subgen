@@ -3,6 +3,7 @@ import platform
 import warnings
 import time
 import subprocess
+import numpy as np
 import torch
 import whisperx
 import librosa
@@ -69,6 +70,30 @@ def _load_openai_whisper_model(model_name: str, device: str, download_root: str)
     except Exception as e:
         rprint(f"[yellow]⚠️ Failed to move OpenAI Whisper model to MPS ({e}); fallback to CPU.[/yellow]")
         return model, "cpu"
+
+
+def _sanitize_audio_segment(audio_segment):
+    if audio_segment is None:
+        return None
+    arr = np.asarray(audio_segment, dtype=np.float32)
+    arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+    return arr
+
+
+def _segment_too_short(audio_segment, min_seconds=0.35, sr=16000):
+    if audio_segment is None:
+        return True
+    return len(audio_segment) < int(min_seconds * sr)
+
+
+def _is_mps_decode_nan_error(err: Exception) -> bool:
+    msg = str(err).lower()
+    return (
+        "expected parameter logits" in msg
+        or "categorical" in msg
+        or "found invalid values" in msg
+        or "nan" in msg
+    )
 
 @except_handler("failed to check hf mirror", default_return=None)
 def check_hf_mirror():
@@ -145,6 +170,15 @@ def transcribe_audio(raw_audio_file, vocal_audio_file, start, end):
         return audio
     raw_audio_segment = load_audio_segment(raw_audio_file, start, end)
     vocal_audio_segment = load_audio_segment(vocal_audio_file, start, end)
+    raw_audio_segment = _sanitize_audio_segment(raw_audio_segment)
+    vocal_audio_segment = _sanitize_audio_segment(vocal_audio_segment)
+
+    if _segment_too_short(raw_audio_segment):
+        rprint(
+            f"[yellow]⚠️ Skip ASR for short/empty segment {start:.2f}s->{end:.2f}s "
+            f"(len={0 if raw_audio_segment is None else len(raw_audio_segment)} samples).[/yellow]"
+        )
+        return {"language": WHISPER_LANGUAGE if WHISPER_LANGUAGE != "auto" else "en", "segments": []}
 
     transcribe_start_time = time.time()
     rprint("[bold green]Note: You will see progress while ASR is running ↓[/bold green]")
@@ -169,13 +203,33 @@ def transcribe_audio(raw_audio_file, vocal_audio_file, start, end):
             if device == "cpu":
                 batch_size = 1
                 compute_type = "int8"
-        result = model.transcribe(
-            raw_audio_segment,
-            language=whisper_language,
-            word_timestamps=False,
-            verbose=True,
-            fp16=(device == "mps")
-        )
+        try:
+            result = model.transcribe(
+                raw_audio_segment,
+                language=whisper_language,
+                word_timestamps=False,
+                verbose=True,
+                # MPS can produce NaN logits with fp16 on some segments; keep this False for stability.
+                fp16=False
+            )
+        except Exception as e:
+            if device == "mps" and _is_mps_decode_nan_error(e):
+                rprint(f"[yellow]⚠️ MPS decode produced invalid logits ({e}); retrying segment on CPU...[/yellow]")
+                try:
+                    del model
+                except Exception:
+                    pass
+                _empty_cache("mps")
+                model, device = _load_openai_whisper_model(model_name, "cpu", MODEL_DIR)
+                result = model.transcribe(
+                    raw_audio_segment,
+                    language=whisper_language,
+                    word_timestamps=False,
+                    verbose=True,
+                    fp16=False
+                )
+            else:
+                raise
         result = {
             "language": result.get("language", whisper_language or "en"),
             "segments": result.get("segments", []),
@@ -196,6 +250,9 @@ def transcribe_audio(raw_audio_file, vocal_audio_file, start, end):
     # 2. align by vocal audio
     # -------------------------
     align_start_time = time.time()
+    if not result.get("segments"):
+        return result
+
     # Align timestamps using vocal audio
     align_device = device if device in {"cuda", "cpu", "mps"} else "cpu"
     try:

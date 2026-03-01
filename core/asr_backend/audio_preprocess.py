@@ -9,6 +9,62 @@ from pydub.silence import detect_silence
 from pydub.utils import mediainfo
 from rich import print as rprint
 
+def _pick_silence_split_point(
+    audio: AudioSegment,
+    threshold: float,
+    duration: float,
+    win: float,
+    safe_margin: float
+):
+    """Find a split point near threshold by adaptively widening the search area and silence threshold."""
+    window_candidates = [win, win * 2, win * 3]
+    # Relative threshold helps when background noise is high and absolute -30 is too strict.
+    rel_thresh = audio.dBFS - 14
+    silence_thresh_candidates = [rel_thresh - 3, rel_thresh, -30, -27, -24]
+    silence_thresh_candidates = [
+        max(-50, min(-12, t)) for t in silence_thresh_candidates if pd.notna(t)
+    ]
+    min_silence_candidates_ms = [int(safe_margin * 1000), 350, 250]
+
+    best_split = None
+    best_distance = float("inf")
+
+    for search_win in window_candidates:
+        ws = int(max(0.0, threshold - search_win) * 1000)
+        we = int(min(duration, threshold + search_win) * 1000)
+        if we <= ws:
+            continue
+
+        sub_audio = audio[ws:we]
+        region_offset = threshold - search_win
+        for min_silence_ms in min_silence_candidates_ms:
+            for silence_thresh in silence_thresh_candidates:
+                silence_regions = detect_silence(
+                    sub_audio,
+                    min_silence_len=max(150, min_silence_ms),
+                    silence_thresh=silence_thresh
+                )
+                if not silence_regions:
+                    continue
+
+                for s, e in silence_regions:
+                    start = s / 1000 + region_offset
+                    end = e / 1000 + region_offset
+                    if (end - start) < (safe_margin * 2):
+                        continue
+                    split_at = start + safe_margin
+                    if split_at <= 0 or split_at >= duration:
+                        continue
+                    distance = abs(split_at - threshold)
+                    if distance < best_distance:
+                        best_distance = distance
+                        best_split = split_at
+
+                if best_split is not None:
+                    return best_split, search_win, silence_thresh, min_silence_ms
+
+    return None, None, None, None
+
 def normalize_audio_volume(audio_path, output_path, target_db = -20.0, format = "wav"):
     audio = AudioSegment.from_file(audio_path)
     change_in_dBFS = target_db - audio.dBFS
@@ -46,7 +102,7 @@ def get_audio_duration(audio_file: str) -> float:
         duration = 0
     return duration
 
-def split_audio(audio_file: str, target_len: float = 30*60, win: float = 60) -> List[Tuple[float, float]]:
+def split_audio(audio_file: str, target_len: float = 30*60, win: float = 120) -> List[Tuple[float, float]]:
     ## 在 [target_len-win, target_len+win] 区间内用 pydub 检测静默，切分音频
     rprint(f"[blue]🎙️ Starting audio segmentation {audio_file} {target_len} {win}[/blue]")
     audio = AudioSegment.from_file(audio_file)
@@ -61,23 +117,17 @@ def split_audio(audio_file: str, target_len: float = 30*60, win: float = 60) -> 
             segments.append((pos, duration)); break
 
         threshold = pos + target_len
-        ws, we = int((threshold - win) * 1000), int((threshold + win) * 1000)
-        
-        # 获取完整的静默区域
-        silence_regions = detect_silence(audio[ws:we], min_silence_len=int(safe_margin*1000), silence_thresh=-30)
-        silence_regions = [(s/1000 + (threshold - win), e/1000 + (threshold - win)) for s, e in silence_regions]
-        # 筛选长度足够（至少1秒）且位置适合的静默区域
-        valid_regions = [
-            (start, end) for start, end in silence_regions 
-            if (end - start) >= (safe_margin * 2) and threshold <= start + safe_margin <= threshold + win
-        ]
-        
-        if valid_regions:
-            start, end = valid_regions[0]
-            split_at = start + safe_margin  # 在静默区域起始点后0.5秒处切分
-        else:
+        split_at, used_win, used_thresh, used_min_silence = _pick_silence_split_point(
+            audio, threshold, duration, win, safe_margin
+        )
+        if split_at is None:
             rprint(f"[yellow]⚠️ No valid silence regions found for {audio_file} at {threshold}s, using threshold[/yellow]")
             split_at = threshold
+        else:
+            rprint(
+                f"[green]✅ Split near {threshold:.1f}s using window ±{used_win:.0f}s, "
+                f"silence_thresh={used_thresh:.1f}dBFS, min_silence={used_min_silence}ms -> {split_at:.3f}s[/green]"
+            )
             
         segments.append((pos, split_at)); pos = split_at
 
