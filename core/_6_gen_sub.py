@@ -515,10 +515,27 @@ def align_timestamp(df_text, df_translate, subtitle_output_configs: list, output
     return df_trans_time
 
 # ✨ Beautify the translation
+def _normalize_ellipsis(text: str) -> str:
+    """
+    Remove excessive ellipsis.
+    - Convert runs like "...", "......", "……" to a single space as sentence separator.
+    - Then collapse repeated spaces.
+    """
+    if not text:
+        return ""
+    # Dot-style ellipsis and unicode ellipsis runs.
+    text = re.sub(r'\.{3,}', ' ', text)
+    text = re.sub(r'…+', ' ', text)
+    # Trim spaces around punctuation after replacement.
+    text = re.sub(r'\s+([,，.。!！?？:：;；])', r'\1', text)
+    text = re.sub(r'\s{2,}', ' ', text)
+    return text.strip()
+
 def clean_translation(x):
     if pd.isna(x):
         return ''
-    cleaned = str(x).strip('。').strip('，')
+    cleaned = _normalize_ellipsis(str(x))
+    cleaned = cleaned.strip('。').strip('，')
     return autocorrect.format(cleaned)
 
 def align_timestamp_main():
