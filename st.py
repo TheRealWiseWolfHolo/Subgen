@@ -241,7 +241,7 @@ def process_audio():
 
 def main():
     st.markdown(button_style, unsafe_allow_html=True)
-    welcome_text = "Hello, welcome to Subgen. If you encounter any issues, feel free to get instant answers with our Free QA Agent <a href=\"https://share.fastgpt.in/chat/share?shareId=066w11n3r9aq6879r4z0v9rh\" target=\"_blank\">here</a>!"
+    welcome_text = "Hello, welcome to Subgen. Adapted from VideoLingo. Original repo: <a href=\"https://github.com/Huanshere/VideoLingo\" target=\"_blank\">Huanshere/VideoLingo</a>."
     st.markdown(f"<p style='font-size: 20px; color: #808080;'>{welcome_text}</p>", unsafe_allow_html=True)
     # add settings
     with st.sidebar:
