@@ -3,6 +3,7 @@ import os, sys
 import threading
 from core.st_utils.imports_and_utils import *
 from core import *
+from core.utils.memory_utils import release_runtime_memory
 from core.utils.translation_confirm import (
     approve_translation_confirmation,
     clear_translation_confirmation,
@@ -105,17 +106,20 @@ def _start_terminal_confirmation_listener_once():
 
 
 def continue_text_after_confirmation():
-    _4_2_translate.translate_all()
-    with st.spinner(t("Processing and aligning subtitles...")):
-        _5_split_sub.split_for_sub_main()
-        _6_gen_sub.align_timestamp_main()
-    with st.spinner(t("Merging subtitles to video...")):
-        _7_sub_into_vid.merge_subtitles_to_video()
-    st.session_state["awaiting_translate_confirmation"] = False
-    st.session_state["terminal_confirm_listener_started"] = False
-    clear_translation_confirmation()
-    st.success(t("Subtitle processing complete! 🎉"))
-    st.balloons()
+    try:
+        _4_2_translate.translate_all()
+        with st.spinner(t("Processing and aligning subtitles...")):
+            _5_split_sub.split_for_sub_main()
+            _6_gen_sub.align_timestamp_main()
+        with st.spinner(t("Merging subtitles to video...")):
+            _7_sub_into_vid.merge_subtitles_to_video()
+        st.session_state["awaiting_translate_confirmation"] = False
+        st.session_state["terminal_confirm_listener_started"] = False
+        clear_translation_confirmation()
+        st.success(t("Subtitle processing complete! 🎉"))
+        st.balloons()
+    finally:
+        release_runtime_memory("subtitle pipeline")
 
 def text_processing_section():
     st.header(t("b. Translate and Generate Subtitles"))
@@ -158,32 +162,36 @@ def text_processing_section():
             return True
 
 def process_text():
-    with st.spinner(t("Using Whisper for transcription...")):
-        _2_asr.transcribe()
-    with st.spinner(t("Splitting long sentences...")):  
-        _3_1_split_nlp.split_by_spacy()
-        _3_2_split_meaning.split_sentences_by_meaning()
-    with st.spinner(t("Summarizing and translating...")):
-        if _safe_load_key("streamlit_terminology_profile_select", True):
-            selected_profile = st.session_state.get("terminology_profile_active", "").strip()
-            if not selected_profile:
-                st.error("Please confirm a terminology profile in the sidebar first. / 请先在侧边栏确认术语档案。")
-                st.stop()
-            _4_1_summarize.set_selected_profile(selected_profile)
-            _4_1_summarize.get_summary(interactive_select=False)
-        else:
-            _4_1_summarize.reset_selected_profile()
-            _4_1_summarize.get_summary(interactive_select=False)
-        if load_key("pause_before_translate"):
-            set_translation_confirmation_pending()
-            st.session_state["awaiting_translate_confirmation"] = True
-            _start_terminal_confirmation_listener_once()
-            st.info(
-                "PAUSE_BEFORE_TRANSLATE is enabled. Please review output/log/terminology.json and confirm in Streamlit or terminal."
-            )
-            return
-        with st.spinner(t("Translating...")):
-            continue_text_after_confirmation()
+    try:
+        with st.spinner(t("Using Whisper for transcription...")):
+            _2_asr.transcribe()
+        with st.spinner(t("Splitting long sentences...")):  
+            _3_1_split_nlp.split_by_spacy()
+            _3_2_split_meaning.split_sentences_by_meaning()
+        with st.spinner(t("Summarizing and translating...")):
+            if _safe_load_key("streamlit_terminology_profile_select", True):
+                selected_profile = st.session_state.get("terminology_profile_active", "").strip()
+                if not selected_profile:
+                    st.error("Please confirm a terminology profile in the sidebar first. / 请先在侧边栏确认术语档案。")
+                    st.stop()
+                _4_1_summarize.set_selected_profile(selected_profile)
+                _4_1_summarize.get_summary(interactive_select=False)
+            else:
+                _4_1_summarize.reset_selected_profile()
+                _4_1_summarize.get_summary(interactive_select=False)
+            if load_key("pause_before_translate"):
+                set_translation_confirmation_pending()
+                st.session_state["awaiting_translate_confirmation"] = True
+                _start_terminal_confirmation_listener_once()
+                st.info(
+                    "PAUSE_BEFORE_TRANSLATE is enabled. Please review output/log/terminology.json and confirm in Streamlit or terminal."
+                )
+                return
+            with st.spinner(t("Translating...")):
+                continue_text_after_confirmation()
+    finally:
+        # Covers ASR/split/summary memory even when waiting for manual confirmation.
+        release_runtime_memory("text stage")
 
 def audio_processing_section():
     st.header(t("c. Dubbing"))
@@ -213,20 +221,23 @@ def audio_processing_section():
                 st.rerun()
 
 def process_audio():
-    with st.spinner(t("Generate audio tasks")): 
-        _8_1_audio_task.gen_audio_task_main()
-        _8_2_dub_chunks.gen_dub_chunks()
-    with st.spinner(t("Extract refer audio")):
-        _9_refer_audio.extract_refer_audio_main()
-    with st.spinner(t("Generate all audio")):
-        _10_gen_audio.gen_audio()
-    with st.spinner(t("Merge full audio")):
-        _11_merge_audio.merge_full_audio()
-    with st.spinner(t("Merge dubbing to the video")):
-        _12_dub_to_vid.merge_video_audio()
-    
-    st.success(t("Audio processing complete! 🎇"))
-    st.balloons()
+    try:
+        with st.spinner(t("Generate audio tasks")): 
+            _8_1_audio_task.gen_audio_task_main()
+            _8_2_dub_chunks.gen_dub_chunks()
+        with st.spinner(t("Extract refer audio")):
+            _9_refer_audio.extract_refer_audio_main()
+        with st.spinner(t("Generate all audio")):
+            _10_gen_audio.gen_audio()
+        with st.spinner(t("Merge full audio")):
+            _11_merge_audio.merge_full_audio()
+        with st.spinner(t("Merge dubbing to the video")):
+            _12_dub_to_vid.merge_video_audio()
+        
+        st.success(t("Audio processing complete! 🎇"))
+        st.balloons()
+    finally:
+        release_runtime_memory("audio stage")
 
 def main():
     st.markdown(button_style, unsafe_allow_html=True)
