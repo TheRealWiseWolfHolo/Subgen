@@ -1,6 +1,5 @@
 <div align="center">
 
-<img src="/docs/logo.png" alt="VideoLingo Logo" height="140">
 
 # 連結世界，逐格前行
 

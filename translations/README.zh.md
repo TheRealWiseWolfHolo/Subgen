@@ -1,6 +1,5 @@
 <div align="center">
 
-<img src="/docs/logo.png" alt="VideoLingo Logo" height="140">
 
 # 连接世界每一帧
 

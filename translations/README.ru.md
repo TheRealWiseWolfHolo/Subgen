@@ -1,6 +1,5 @@
 <div align="center">
 
-<img src="/docs/logo.png" alt="VideoLingo Logo" height="140">
 
 # Объединяя Мир, Кадр за Кадром
 
