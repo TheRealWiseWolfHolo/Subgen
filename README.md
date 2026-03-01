@@ -48,21 +48,44 @@ git clone https://github.com/TheRealWiseWolfHolo/Subgen.git
 cd Subgen
 ```
 
-2. Create environment and install:
+2. Create environment:
 ```bash
 conda create -n subgen python=3.10.0 -y
 conda activate subgen
-python install.py
 ```
 
-3. Create local config and fill your keys:
+3. Install dependencies (manual / reproducible path):
+```bash
+python -m pip install --upgrade pip
+python -m pip install --upgrade torch torchaudio
+python -m pip install -r requirements.txt
+python -m pip install --no-deps "demucs[dev] @ git+https://github.com/adefossez/demucs"
+python -m pip install -e .
+```
+
+4. Alternative installer:
+```bash
+python install.py
+```
+`install.py` does the same core steps and includes platform-aware PyTorch install logic.
+
+5. Create local config and fill your keys:
 ```bash
 cp config.example.yaml config.yaml
 ```
 
-4. Run:
+6. Run:
 ```bash
 streamlit run st.py
+```
+
+## Dependency Notes
+
+- `requirements.txt` intentionally does not pin `demucs` directly.
+- `demucs` currently depends on old `torchaudio` constraints; to keep newer `torch/torchaudio`, install demucs separately with `--no-deps`.
+- If you see `ModuleNotFoundError: No module named 'demucs'`, run:
+```bash
+python -m pip install --no-deps "demucs[dev] @ git+https://github.com/adefossez/demucs"
 ```
 
 ## Config Notes
