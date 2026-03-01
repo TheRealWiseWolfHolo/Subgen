@@ -140,6 +140,13 @@ def main():
         console.print(Panel(t("Installing project in editable mode using `pip install -e .`"), style="cyan"))
         subprocess.check_call([sys.executable, "-m", "pip", "install", "-e", "."], env={**os.environ, "PIP_NO_CACHE_DIR": "0", "PYTHONIOENCODING": "utf-8"})
 
+    def install_demucs_without_deps():
+        console.print(Panel(t("Installing Demucs separately with `--no-deps` to avoid torchaudio resolver conflicts"), style="cyan"))
+        subprocess.check_call([
+            sys.executable, "-m", "pip", "install", "--no-deps",
+            "demucs[dev] @ git+https://github.com/adefossez/demucs"
+        ])
+
     @except_handler("Failed to install Noto fonts")
     def install_noto_font():
         # Detect Linux distribution type
@@ -162,6 +169,10 @@ def main():
         install_noto_font()
     
     install_requirements()
+    @except_handler("Failed to install Demucs")
+    def try_install_demucs():
+        install_demucs_without_deps()
+    try_install_demucs()
     check_ffmpeg()
     
     # First panel with installation complete and startup command
