@@ -3,8 +3,9 @@
 # * Settings marked with * are advanced settings that won't appear in the Streamlit page and can only be modified manually in config.py
 # recommend to set in streamlit page
 # -------------------
-# version: "3.0.0"
-# author: "Huanshere"
+# version: "0.1.0"
+# Author: "TheRealWiseWolfHolo"
+# adapted from VideoLingo, author: Huanshere
 # -------------------
 
 ## ======================== Basic Settings ======================== ##
