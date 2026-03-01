@@ -122,14 +122,18 @@ def main():
     # Detect system and GPU
     has_gpu = platform.system() != 'Darwin' and check_nvidia_gpu()
     if has_gpu:
-        console.print(Panel(t("🎮 NVIDIA GPU detected, installing CUDA version of PyTorch..."), style="cyan"))
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "torch==2.0.0", "torchaudio==2.0.0", "--index-url", "https://download.pytorch.org/whl/cu118"])
+        console.print(Panel(t("🎮 NVIDIA GPU detected, installing CUDA version of PyTorch (latest from cu121 channel)..."), style="cyan"))
+        subprocess.check_call([
+            sys.executable, "-m", "pip", "install", "--upgrade",
+            "torch", "torchaudio",
+            "--index-url", "https://download.pytorch.org/whl/cu121"
+        ])
     else:
         if platform.system() == 'Darwin':
-            console.print(Panel(t("🍎 macOS detected, installing PyTorch (Apple Silicon MPS acceleration supported)..."), style="cyan"))
+            console.print(Panel(t("🍎 macOS detected, installing latest PyTorch (Apple Silicon MPS acceleration supported)..."), style="cyan"))
         else:
-            console.print(Panel(t("💻 No NVIDIA GPU detected, installing CPU version of PyTorch... Note: local ASR may be slower."), style="cyan"))
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "torch==2.1.2", "torchaudio==2.1.2"])
+            console.print(Panel(t("💻 No NVIDIA GPU detected, installing latest CPU version of PyTorch... Note: local ASR may be slower."), style="cyan"))
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "torch", "torchaudio"])
 
     @except_handler("Failed to install project")
     def install_requirements():
