@@ -82,6 +82,7 @@ streamlit run st.py
 ## Dependency Notes
 
 - `requirements.txt` intentionally does not pin `demucs` directly.
+- `requirements.txt` includes Demucs runtime dependencies (except `torch`/`torchaudio`, which are managed separately for latest-version installs).
 - `demucs` currently depends on old `torchaudio` constraints; to keep newer `torch/torchaudio`, install demucs separately with `--no-deps`.
 - If you see `ModuleNotFoundError: No module named 'demucs'`, run:
 ```bash
