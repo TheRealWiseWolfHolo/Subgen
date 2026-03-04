@@ -7,6 +7,7 @@ import shutil
 from functools import partial
 from rich.panel import Panel
 from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn, TimeElapsedColumn
 from core import *
 
 console = Console()
@@ -25,8 +26,10 @@ def process_video(file, dubbing=False, is_retry=False):
         ("🎥 Processing input file", partial(process_input_file, file)),
         ("🎙️ Transcribing with Whisper", partial(_2_asr.transcribe)),
         ("✂️ Splitting sentences", split_sentences),
-        ("📝 Summarizing and translating", summarize_and_translate),
-        ("⚡ Processing and aligning subtitles", process_and_align_subtitles),
+        ("📝 Summarizing terminology", summarize_only),
+        ("🌐 Translating subtitles", translate_only),
+        ("✂️ Splitting translated subtitles", _5_split_sub.split_for_sub_main),
+        ("🕒 Aligning timestamps & generating srt", _6_gen_sub.align_timestamp_main),
         ("🎬 Merging subtitles to video", _7_sub_into_vid.merge_subtitles_to_video),
     ]
     
@@ -41,32 +44,38 @@ def process_video(file, dubbing=False, is_retry=False):
         text_steps.extend(dubbing_steps)
     
     current_step = ""
-    for step_name, step_func in text_steps:
-        current_step = step_name
-        for attempt in range(3):
-            try:
-                console.print(Panel(
-                    f"[bold green]{step_name}[/]",
-                    subtitle=f"Attempt {attempt + 1}/3" if attempt > 0 else None,
-                    border_style="blue"
-                ))
-                result = step_func()
-                if result is not None:
-                    globals().update(result)
-                break
-            except Exception as e:
-                if attempt == 2:
-                    error_panel = Panel(
-                        f"[bold red]Error in step '{current_step}':[/]\n{str(e)}",
-                        border_style="red"
-                    )
-                    console.print(error_panel)
-                    cleanup(ERROR_OUTPUT_DIR)
-                    return False, current_step, str(e)
-                console.print(Panel(
-                    f"[yellow]Attempt {attempt + 1} failed. Retrying...[/]",
-                    border_style="yellow"
-                ))
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold cyan]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TimeElapsedColumn(),
+        transient=True,
+        console=console
+    ) as progress:
+        task_id = progress.add_task("Starting pipeline...", total=len(text_steps))
+        for step_name, step_func in text_steps:
+            current_step = step_name
+            progress.update(task_id, description=f"{step_name}")
+            for attempt in range(3):
+                try:
+                    if attempt > 0:
+                        console.print(f"[cyan]↻ Retrying step: {step_name} ({attempt + 1}/3)[/cyan]")
+                    result = step_func()
+                    if result is not None:
+                        globals().update(result)
+                    progress.advance(task_id)
+                    break
+                except Exception as e:
+                    if attempt == 2:
+                        error_panel = Panel(
+                            f"[bold red]Error in step '{current_step}':[/]\n{str(e)}",
+                            border_style="red"
+                        )
+                        console.print(error_panel)
+                        cleanup(ERROR_OUTPUT_DIR)
+                        return False, current_step, str(e)
+                    console.print(f"[yellow]⚠️ Step failed, retrying ({attempt + 1}/3): {step_name}[/yellow]")
     
     console.print(Panel("[bold green]All steps completed successfully! 🎉[/]", border_style="green"))
     cleanup(SAVE_DIR)
@@ -92,7 +101,7 @@ def split_sentences():
     _3_1_split_nlp.split_by_spacy()
     _3_2_split_meaning.split_sentences_by_meaning()
 
-def summarize_and_translate():
+def summarize_only():
     repick_each_video = load_key("batch_terminology_pick_each_video")
     if repick_each_video:
         _4_1_summarize.reset_selected_profile()
@@ -100,15 +109,12 @@ def summarize_and_translate():
     else:
         _4_1_summarize.get_summary()
 
+def translate_only():
     if load_key("pause_before_translate"):
         wait_for_translation_confirmation_cli(
             "⚠️ PAUSE_BEFORE_TRANSLATE is enabled. Review output/log/terminology.json, then press ENTER to continue..."
         )
     _4_2_translate.translate_all()
-
-def process_and_align_subtitles():
-    _5_split_sub.split_for_sub_main()
-    _6_gen_sub.align_timestamp_main()
 
 def gen_audio_tasks():
     _8_1_audio_task.gen_audio_task_main()
