@@ -1,9 +1,16 @@
-from core.prompts import generate_shared_prompt, get_prompt_faithfulness, get_prompt_expressiveness
+from core.prompts import (
+    generate_shared_prompt,
+    get_prompt_faithfulness,
+    get_prompt_expressiveness,
+    get_zh_natural_polish_prompt,
+)
 from rich.panel import Panel
 from rich.console import Console
 from rich.table import Table
 from rich import box
 from core.utils import *
+import re
+import json
 console = Console()
 
 def valid_translate_result(result: dict, required_keys: list, required_sub_keys: list):
@@ -17,6 +24,79 @@ def valid_translate_result(result: dict, required_keys: list, required_sub_keys:
             return {"status": "error", "message": f"Missing required sub-key(s) in item {key}: {', '.join(set(required_sub_keys) - set(result[key].keys()))}"}
 
     return {"status": "success", "message": "Translation completed"}
+
+
+def _is_chinese_target_language():
+    try:
+        tgt = str(load_key("target_language")).lower()
+    except Exception:
+        return False
+    return ("中文" in tgt) or ("chinese" in tgt) or tgt.startswith("zh")
+
+
+def _basic_zh_surface_cleanup(line: str) -> str:
+    text = str(line or "").replace("\n", " ").strip()
+    text = re.sub(r'\s*([，。！？；：、])\s*', r'\1', text)
+    text = re.sub(r'\s{2,}', ' ', text).strip()
+    return text
+
+
+_ZH_TRANSLATIONESE_PATTERNS = [
+    re.compile(r'在.+(之后|以后|之前)'),
+    re.compile(r'如果.+的话'),
+    re.compile(r'原因是因为'),
+    re.compile(r'是因为.+的原因'),
+    re.compile(r'进行(分析|研究|讨论|处理|比较|测试|检查|说明|观察|评估|优化|调整)'),
+    re.compile(r'对于.+来说'),
+]
+
+
+def _collect_zh_polish_candidates(lines):
+    candidates = []
+    for i, line in enumerate(lines, start=1):
+        txt = _basic_zh_surface_cleanup(line)
+        if not txt:
+            continue
+        if any(p.search(txt) for p in _ZH_TRANSLATIONESE_PATTERNS):
+            candidates.append({"id": str(i), "text": txt})
+    return candidates
+
+
+def _llm_polish_zh_lines(lines, log_title="translate_zh_polish"):
+    if not _is_chinese_target_language():
+        return [_basic_zh_surface_cleanup(x) for x in lines]
+
+    polished = [_basic_zh_surface_cleanup(x) for x in lines]
+    candidates = _collect_zh_polish_candidates(polished)
+    if not candidates:
+        return polished
+
+    prompt = get_zh_natural_polish_prompt(candidates_json=json.dumps(candidates, ensure_ascii=False, indent=2))
+
+    def valid_polish(resp):
+        if not isinstance(resp, dict) or "items" not in resp or not isinstance(resp["items"], list):
+            return {"status": "error", "message": "Invalid polish response format"}
+        for item in resp["items"]:
+            if not isinstance(item, dict) or "id" not in item or "natural" not in item:
+                return {"status": "error", "message": "Invalid polish item format"}
+        return {"status": "success", "message": "ok"}
+
+    try:
+        resp = ask_gpt(prompt, resp_type="json", valid_def=valid_polish, log_title=log_title)
+        id_to_text = {str(it["id"]).strip(): _basic_zh_surface_cleanup(it.get("natural", "")) for it in resp.get("items", [])}
+        for c in candidates:
+            idx = int(c["id"]) - 1
+            new_text = id_to_text.get(c["id"], "").strip()
+            if 0 <= idx < len(polished) and new_text:
+                polished[idx] = new_text
+    except Exception as e:
+        console.print(f"[yellow]⚠️ Chinese naturalness polish skipped due to LLM error: {e}[/yellow]")
+
+    return polished
+
+
+def _postprocess_translation_line(line: str) -> str:
+    return _basic_zh_surface_cleanup(line)
 
 def translate_lines(lines, previous_content_prompt, after_cotent_prompt, things_to_note_prompt, summary_prompt, index = 0):
     shared_prompt = generate_shared_prompt(previous_content_prompt, after_cotent_prompt, summary_prompt, things_to_note_prompt)
@@ -42,8 +122,10 @@ def translate_lines(lines, previous_content_prompt, after_cotent_prompt, things_
     prompt1 = get_prompt_faithfulness(lines, shared_prompt)
     faith_result = retry_translation(prompt1, len(lines.split('\n')), 'faithfulness')
 
-    for i in faith_result:
-        faith_result[i]["direct"] = faith_result[i]["direct"].replace('\n', ' ')
+    faith_direct_list = [_postprocess_translation_line(faith_result[i]["direct"]) for i in faith_result]
+    faith_direct_list = _llm_polish_zh_lines(faith_direct_list, log_title="translate_zh_polish_direct")
+    for idx, key in enumerate(faith_result):
+        faith_result[key]["direct"] = faith_direct_list[idx]
 
     # If reflect_translate is False or not set, use faithful translation directly
     reflect_translate = load_key('reflect_translate')
@@ -77,7 +159,9 @@ def translate_lines(lines, previous_content_prompt, after_cotent_prompt, things_
 
     console.print(table)
 
-    translate_result = "\n".join([express_result[i]["free"].replace('\n', ' ').strip() for i in express_result])
+    free_lines = [_postprocess_translation_line(express_result[i]["free"]) for i in express_result]
+    free_lines = _llm_polish_zh_lines(free_lines, log_title="translate_zh_polish_free")
+    translate_result = "\n".join(free_lines)
 
     if len(lines.split('\n')) != len(translate_result.split('\n')):
         console.print(Panel(f'[red]❌ Translation of block {index} failed, Length Mismatch, Please check `output/gpt_log/translate_expressiveness.json`[/red]'))

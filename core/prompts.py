@@ -212,6 +212,42 @@ Note: Start you answer with ```json and end with ```, do not add any other text.
 """.strip()
     return prompt
 
+
+def get_zh_natural_polish_prompt(candidates_json):
+    prompt = f"""
+## Role
+You are a Chinese subtitle editor focused on removing translationese (翻译腔) while preserving meaning.
+
+## Task
+For each candidate line, decide whether it sounds unnatural in Chinese.
+If yes, rewrite it to a more natural Chinese subtitle style.
+If no, keep it unchanged.
+
+Rules:
+1. Preserve original meaning and tense.
+2. Keep names/terms unchanged unless grammar requires punctuation adjustment.
+3. Keep each output concise for subtitle reading.
+4. Return exactly one result for each input id.
+
+## INPUT
+<candidates>
+{candidates_json}
+</candidates>
+
+## Output in only JSON format and no other text
+{{
+  "items": [
+    {{
+      "id": "1",
+      "natural": "rewritten or unchanged chinese line"
+    }}
+  ]
+}}
+
+Note: Start you answer with ```json and end with ```, do not add any other text.
+""".strip()
+    return prompt
+
 ## ================================================================
 # @ step5_translate.py & translate_lines.py
 def generate_shared_prompt(previous_content_prompt, after_content_prompt, summary_prompt, things_to_note_prompt):
@@ -321,6 +357,9 @@ Please use a two-step thinking process to handle the text line by line:
    - Ensure it's easy for {TARGET_LANGUAGE} audience to understand and accept
    - Adapt the language style to match the theme (e.g., use casual language for tutorials, professional terminology for technical content, formal language for documentaries)
    - Keep person names in original English unless the name has a widely established {TARGET_LANGUAGE} exonym for a globally famous figure
+   - Avoid literal English-to-Chinese calques (翻译腔). Prioritize natural Chinese word order and expression.
+   - Prefer natural temporal ordering in Chinese (e.g., use “Y 之后，X” rather than rigid “X 在 Y 之后” when context allows).
+   - Avoid stiff wording like excessive “进行…” or redundant structures such as “原因是因为…”.
 </Translation Analysis Steps>
    
 ## INPUT
