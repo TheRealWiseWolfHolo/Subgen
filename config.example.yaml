@@ -92,6 +92,8 @@ pause_before_translate: true
 streamlit_terminology_profile_select: true
 # *For batch mode: prompt terminology profile selection for every video
 batch_terminology_pick_each_video: true
+# *For Streamlit mode: automatically archive outputs to history after subtitle generation completes
+auto_archive_after_subtitles: false
 
 ## ======================== Dubbing Settings ======================== ##
 # TTS selection [sf_fish_tts, openai_tts, gpt_sovits, azure_tts, fish_tts, edge_tts, custom_tts]

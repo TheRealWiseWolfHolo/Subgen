@@ -128,7 +128,12 @@ def continue_text_after_confirmation():
         st.session_state["awaiting_translate_confirmation"] = False
         st.session_state["terminal_confirm_listener_started"] = False
         clear_translation_confirmation()
-        st.success(t("Subtitle processing complete! 🎉"))
+        if _safe_load_key("auto_archive_after_subtitles", False):
+            with st.spinner("Auto-archiving to history..."):
+                cleanup()
+            st.success("Subtitle processing complete and archived to history. 🎉")
+        else:
+            st.success(t("Subtitle processing complete! 🎉"))
         st.balloons()
     finally:
         release_runtime_memory("subtitle pipeline")
