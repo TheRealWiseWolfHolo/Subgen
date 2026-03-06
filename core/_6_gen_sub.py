@@ -29,6 +29,23 @@ def _safe_load_key(key, default):
     except Exception:
         return default
 
+
+def _close_tiny_gaps(df_trans_time):
+    """
+    Optionally close very small gaps between adjacent subtitles.
+    Keep conservative by default to avoid noticeable timing drift.
+    """
+    gap_close_seconds = float(_safe_load_key("subtitle_gap_close_seconds", 0.1))
+    if gap_close_seconds <= 0:
+        return
+    for i in range(len(df_trans_time) - 1):
+        delta_time = float(df_trans_time.loc[i + 1, 'timestamp'][0]) - float(df_trans_time.loc[i, 'timestamp'][1])
+        if 0 < delta_time <= gap_close_seconds:
+            df_trans_time.at[i, 'timestamp'] = (
+                float(df_trans_time.loc[i, 'timestamp'][0]),
+                float(df_trans_time.loc[i + 1, 'timestamp'][0])
+            )
+
 def convert_to_srt_format(start_time, end_time):
     """Convert time (in seconds) to the format: hours:minutes:seconds,milliseconds"""
     def seconds_to_hmsm(seconds):
@@ -433,11 +450,8 @@ def align_timestamp(df_text, df_translate, subtitle_output_configs: list, output
         lambda x: infer_speaker_for_timestamp(df_text, float(x[0]), float(x[1]))
     )
 
-    # Remove gaps 🕳️
-    for i in range(len(df_trans_time)-1):
-        delta_time = df_trans_time.loc[i+1, 'timestamp'][0] - df_trans_time.loc[i, 'timestamp'][1]
-        if 0 < delta_time < 1:
-            df_trans_time.at[i, 'timestamp'] = (df_trans_time.loc[i, 'timestamp'][0], df_trans_time.loc[i+1, 'timestamp'][0])
+    # Optionally close only tiny gaps to reduce visible micro-flicker without causing large drift.
+    _close_tiny_gaps(df_trans_time)
 
     # First, merge tiny blocks into neighbors (preferred behavior).
     min_block_ms = int(_safe_load_key("subtitle_min_duration_ms", 100))

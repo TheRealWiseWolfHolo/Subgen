@@ -22,6 +22,8 @@ st.set_page_config(page_title="Subgen", page_icon="docs/logo.svg")
 
 SUB_VIDEO = "output/output_sub.mp4"
 DUB_VIDEO = "output/output_dub.mp4"
+TEMP_PROFILE_SENTINEL = "__TEMP_PROFILE__"
+TEMP_PROFILE_LABEL = "⚡ Temporary (Not Saved) / 临时（不保存）"
 
 def _safe_load_key(key, default):
     try:
@@ -50,13 +52,15 @@ def render_terminology_profile_selector():
         st.session_state["terminology_profile_active"] = st.session_state["terminology_profile_name"]
 
     profile_names = _4_1_summarize.list_terminology_profile_names()
-    options = profile_names + ["+ New profile"]
+    options = profile_names + ["+ New profile", TEMP_PROFILE_LABEL]
     default_idx = 0
     active_profile = st.session_state.get("terminology_profile_active", "")
     if active_profile:
         current = active_profile
         if current in profile_names:
             default_idx = profile_names.index(current)
+        elif current == TEMP_PROFILE_SENTINEL:
+            default_idx = options.index(TEMP_PROFILE_LABEL)
 
     selected = st.selectbox("Terminology Profile / 术语档案", options=options, index=default_idx)
     candidate_profile = ""
@@ -64,6 +68,8 @@ def render_terminology_profile_selector():
         new_name = st.text_input("New Profile Name / 新档案名称")
         if new_name.strip():
             candidate_profile = new_name.strip()
+    elif selected == TEMP_PROFILE_LABEL:
+        candidate_profile = TEMP_PROFILE_SENTINEL
     else:
         candidate_profile = selected
 
@@ -74,11 +80,17 @@ def render_terminology_profile_selector():
         else:
             st.session_state["terminology_profile_active"] = candidate_profile
             st.session_state["terminology_profile_name"] = candidate_profile
-            st.success(f"Profile confirmed / 已确认档案: {candidate_profile}")
+            if candidate_profile == TEMP_PROFILE_SENTINEL:
+                st.success("Temporary profile confirmed / 已确认临时档案（不会保存）")
+            else:
+                st.success(f"Profile confirmed / 已确认档案: {candidate_profile}")
 
     active_profile = st.session_state.get("terminology_profile_active", "").strip()
     if active_profile:
-        st.info(f"Current profile / 当前档案: {active_profile}")
+        if active_profile == TEMP_PROFILE_SENTINEL:
+            st.info("Current profile / 当前档案: ⚡ Temporary (Not Saved) / 临时（不保存）")
+        else:
+            st.info(f"Current profile / 当前档案: {active_profile}")
     else:
         st.warning("No profile confirmed yet. / 尚未确认档案。")
 
@@ -174,7 +186,10 @@ def process_text():
                 if not selected_profile:
                     st.error("Please confirm a terminology profile in the sidebar first. / 请先在侧边栏确认术语档案。")
                     st.stop()
-                _4_1_summarize.set_selected_profile(selected_profile)
+                if selected_profile == TEMP_PROFILE_SENTINEL:
+                    _4_1_summarize.set_temporary_profile("streamlit_temp")
+                else:
+                    _4_1_summarize.set_selected_profile(selected_profile)
                 _4_1_summarize.get_summary(interactive_select=False)
             else:
                 _4_1_summarize.reset_selected_profile()

@@ -68,6 +68,8 @@ subtitle:
 subtitle_min_duration_ms: 100
 # *When merging short blocks, prefer at most this many lines (overflow falls back to space-separated text)
 subtitle_merge_max_lines: 2
+# *Close only very tiny adjacent subtitle gaps (seconds). Set 0 to disable gap-closing and preserve raw boundaries.
+subtitle_gap_close_seconds: 0.1
 
 # *Summary length, set low to 2k if using local LLM
 summary_length: 16000

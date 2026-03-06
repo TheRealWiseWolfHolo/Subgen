@@ -16,6 +16,8 @@ from core.utils.models import _3_2_SPLIT_BY_MEANING, _4_1_TERMINOLOGY
 CUSTOM_TERMS_PATH = 'custom_terms.xlsx'
 TERMINOLOGY_LIBRARY_DIR = Path("history/terminology_profiles")
 _SELECTED_PROFILE_PATH = None
+_SELECTED_PROFILE_PERSIST = True
+_SELECTED_PROFILE_LABEL = ""
 
 def _safe_load_key(key, default):
     try:
@@ -25,8 +27,10 @@ def _safe_load_key(key, default):
 
 def reset_selected_profile():
     """Reset cached terminology profile selection in current process."""
-    global _SELECTED_PROFILE_PATH
+    global _SELECTED_PROFILE_PATH, _SELECTED_PROFILE_PERSIST, _SELECTED_PROFILE_LABEL
     _SELECTED_PROFILE_PATH = None
+    _SELECTED_PROFILE_PERSIST = True
+    _SELECTED_PROFILE_LABEL = ""
 
 def combine_chunks(limit=None):
     """Combine the text chunks identified by whisper into a single long text"""
@@ -161,14 +165,26 @@ def _name_to_profile_path(name: str) -> Path:
         normalized += ".json"
     return TERMINOLOGY_LIBRARY_DIR / normalized
 
-def set_selected_profile(profile_name: str):
+def set_selected_profile(profile_name: str, persist: bool = True):
     """Select (and create if missing) a terminology profile by name."""
-    global _SELECTED_PROFILE_PATH
+    global _SELECTED_PROFILE_PATH, _SELECTED_PROFILE_PERSIST, _SELECTED_PROFILE_LABEL
+    if not persist:
+        _SELECTED_PROFILE_PATH = None
+        _SELECTED_PROFILE_PERSIST = False
+        _SELECTED_PROFILE_LABEL = str(profile_name).strip() or "Temporary profile"
+        return None
     profile_path = _name_to_profile_path(profile_name)
     if not profile_path.exists():
         _save_profile_terms(profile_path, [])
     _SELECTED_PROFILE_PATH = profile_path
+    _SELECTED_PROFILE_PERSIST = True
+    _SELECTED_PROFILE_LABEL = profile_path.stem
     return _SELECTED_PROFILE_PATH
+
+
+def set_temporary_profile(label: str = "Temporary profile"):
+    """Use in-memory terminology profile for current run only (do not save to history)."""
+    return set_selected_profile(label, persist=False)
 
 def _pick_terminology_profile_cli() -> Path:
     while True:
@@ -379,14 +395,15 @@ def search_things_to_note_in_prompt(sentence):
         return None
 
 def get_summary(interactive_select=None):
-    global _SELECTED_PROFILE_PATH
+    global _SELECTED_PROFILE_PATH, _SELECTED_PROFILE_PERSIST, _SELECTED_PROFILE_LABEL
     full_content = combine_chunks(limit=None)
     src_content = combine_chunks(limit=load_key('summary_length'))
     if interactive_select is None:
         interactive_select = sys.stdin.isatty()
 
-    if interactive_select and _SELECTED_PROFILE_PATH is None:
+    if interactive_select and _SELECTED_PROFILE_PATH is None and _SELECTED_PROFILE_PERSIST:
         _SELECTED_PROFILE_PATH = _pick_terminology_profile_cli()
+        _SELECTED_PROFILE_LABEL = _SELECTED_PROFILE_PATH.stem if _SELECTED_PROFILE_PATH else ""
 
     profile_terms, profile_freq = _load_profile(_SELECTED_PROFILE_PATH) if _SELECTED_PROFILE_PATH else ([], {})
     custom_terms = _load_custom_terms()
@@ -398,6 +415,9 @@ def get_summary(interactive_select=None):
         rprint(f"📖 Custom Terms Loaded: {len(custom_terms)} terms")
     if _SELECTED_PROFILE_PATH:
         rprint(f"📚 Using terminology profile: `{_SELECTED_PROFILE_PATH}` ({len(profile_terms)} terms)")
+    elif not _SELECTED_PROFILE_PERSIST:
+        label = _SELECTED_PROFILE_LABEL or "Temporary profile"
+        rprint(f"🧪 Using temporary terminology profile: `{label}` (not saved)")
 
     summary_prompt = get_summary_prompt(src_content, {"terms": existing_terms})
     rprint("📝 Summarizing and extracting terminology ...")
@@ -426,7 +446,7 @@ def get_summary(interactive_select=None):
         json.dump(summary_output, f, ensure_ascii=False, indent=4)
 
     rprint(f'💾 Summary log saved to → `{_4_1_TERMINOLOGY}`')
-    if _SELECTED_PROFILE_PATH:
+    if _SELECTED_PROFILE_PERSIST and _SELECTED_PROFILE_PATH:
         merged_profile_terms = _merge_terms(profile_terms, summary_terms, person_name_terms_translated)
         updated_profile_freq = _bump_term_frequency(profile_freq, summary_terms + person_name_terms_translated)
         keep_top_n = int(_safe_load_key("terminology_profile_keep_top_n", 0))

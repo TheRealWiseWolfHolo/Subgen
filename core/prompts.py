@@ -296,6 +296,7 @@ We have a segment of original {src_language} subtitles that need to be directly 
 2. Accurate terminology: Use professional terms correctly and maintain consistency in terminology.
 3. Understand the context: Fully comprehend and reflect the background and contextual relationships of the text.
 4. Person names policy: Keep personal names in original English by default. Only translate person names into {TARGET_LANGUAGE} when they are globally famous figures with widely established {TARGET_LANGUAGE} names (e.g., Shakespeare, Einstein). Do not translate non-famous personal names.
+5. Line-boundary constraint: translate each input subtitle line independently; do not move semantic content to neighboring lines and do not merge/split semantic responsibility across lines.
 </translation_principles>
 
 ## INPUT
@@ -357,6 +358,8 @@ Please use a two-step thinking process to handle the text line by line:
    - Ensure it's easy for {TARGET_LANGUAGE} audience to understand and accept
    - Adapt the language style to match the theme (e.g., use casual language for tutorials, professional terminology for technical content, formal language for documentaries)
    - Keep person names in original English unless the name has a widely established {TARGET_LANGUAGE} exonym for a globally famous figure
+   - Keep strict line-level semantic correspondence: each output line must preserve the meaning scope of its matching input line only.
+   - Do not transfer key information to neighboring lines, even if reordering words inside the same line is needed.
    - Avoid literal English-to-Chinese calques (翻译腔). Prioritize natural Chinese word order and expression.
    - Prefer natural temporal ordering in Chinese (e.g., use “Y 之后，X” rather than rigid “X 在 Y 之后” when context allows).
    - Avoid stiff wording like excessive “进行…” or redundant structures such as “原因是因为…”.
@@ -403,8 +406,12 @@ Your task is to create the best splitting scheme for the {targ_lang} subtitles b
 
 1. Analyze the word order and structural correspondence between {src_lang} and {targ_lang} subtitles
 2. Split the {targ_lang} subtitles according to the pre-processed {src_lang} split version
-3. Never leave empty lines. If it's difficult to split based on meaning, you may appropriately rewrite the sentences that need to be aligned
-4. Do not add comments or explanations in the translation, as the subtitles are for the audience to read
+3. Never leave empty lines.
+4. STRICT one-to-one semantic mapping: each `target_part_i` must correspond only to `src_part_i` at the same index.
+5. Do not move meaning between adjacent parts, do not borrow content from previous/next part, and do not merge two source parts into one target part.
+6. Rephrase only within the current part for fluency while preserving the same meaning scope.
+7. If a source part is a fragment (e.g., clause continuation), keep translation concise and fragment-consistent rather than moving its meaning to another part.
+8. Do not add comments or explanations in the translation, as the subtitles are for the audience to read
 
 ## INPUT
 <subtitles>
