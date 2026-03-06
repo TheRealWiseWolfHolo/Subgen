@@ -46,6 +46,23 @@ def _close_tiny_gaps(df_trans_time):
                 float(df_trans_time.loc[i + 1, 'timestamp'][0])
             )
 
+
+def _close_final_small_gaps(df_trans_time):
+    """
+    Final pass: close small remaining gaps at the end of subtitle timing pipeline.
+    This is intended for editor-friendliness (e.g. remove <=0.3s micro-gaps).
+    """
+    gap_close_seconds = float(_safe_load_key("subtitle_final_gap_close_seconds", 0.3))
+    if gap_close_seconds <= 0:
+        return
+    for i in range(len(df_trans_time) - 1):
+        delta_time = float(df_trans_time.loc[i + 1, 'timestamp'][0]) - float(df_trans_time.loc[i, 'timestamp'][1])
+        if 0 < delta_time <= gap_close_seconds:
+            df_trans_time.at[i, 'timestamp'] = (
+                float(df_trans_time.loc[i, 'timestamp'][0]),
+                float(df_trans_time.loc[i + 1, 'timestamp'][0])
+            )
+
 def convert_to_srt_format(start_time, end_time):
     """Convert time (in seconds) to the format: hours:minutes:seconds,milliseconds"""
     def seconds_to_hmsm(seconds):
@@ -483,6 +500,10 @@ def align_timestamp(df_text, df_translate, subtitle_output_configs: list, output
     df_trans_time['duration'] = df_trans_time['timestamp'].apply(lambda x: x[1] - x[0])
     if '_speaker_id' in df_trans_time.columns:
         df_trans_time = df_trans_time.drop(columns=['_speaker_id'])
+
+    # Final editor-friendly pass: close small residual gaps between adjacent subtitle blocks.
+    _close_final_small_gaps(df_trans_time)
+    df_trans_time['duration'] = df_trans_time['timestamp'].apply(lambda x: x[1] - x[0])
 
     # Detect suspicious subtitle timeline holes for easier debugging.
     subtitle_gap_threshold = load_key("subtitle_gap_threshold_seconds")
