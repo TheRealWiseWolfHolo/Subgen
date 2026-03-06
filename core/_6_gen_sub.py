@@ -192,10 +192,6 @@ def get_sentence_timestamps(df_words, df_sentences):
             current_pos += 1
             
         if not match_found:
-            print(f"\n⚠️ Warning: No exact match found for sentence: {sentence}")
-            show_difference(clean_sentence, 
-                          full_words_str[current_pos:current_pos+len(clean_sentence)])
-            print("\nOriginal sentence:", df_sentences['Source'][idx])
             # Try a wider fuzzy rematch before giving up.
             wide_fuzzy = find_local_fuzzy_match(
                 df_words=df_words,
@@ -208,10 +204,18 @@ def get_sentence_timestamps(df_words, df_sentences):
             )
             if wide_fuzzy is not None:
                 fuzzy_start_time, fuzzy_end_time, fuzzy_s_idx, fuzzy_e_idx, score = wide_fuzzy
-                print(
-                    f"⚠️ No exact match, using wide fuzzy rematch "
-                    f"(score={score:.3f}, words={fuzzy_s_idx}-{fuzzy_e_idx})."
-                )
+                match_log_threshold = float(_safe_load_key("subtitle_match_log_threshold", 0.999))
+                if score < match_log_threshold:
+                    print(f"\n⚠️ Warning: No exact match found for sentence: {sentence}")
+                    show_difference(
+                        clean_sentence,
+                        full_words_str[current_pos:current_pos+len(clean_sentence)]
+                    )
+                    print("\nOriginal sentence:", df_sentences['Source'][idx])
+                    print(
+                        f"⚠️ No exact match, using wide fuzzy rematch "
+                        f"(score={score:.3f}, words={fuzzy_s_idx}-{fuzzy_e_idx})."
+                    )
                 time_stamp_list.append((fuzzy_start_time, fuzzy_end_time))
                 prev_end_time = fuzzy_end_time
                 prev_end_word_idx = fuzzy_e_idx
