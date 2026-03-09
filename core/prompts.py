@@ -431,8 +431,49 @@ Pre-processed {src_lang} Subtitles ([br] indicates split points): {src_part}
 ```
 
 Note: Start you answer with ```json and end with ```, do not add any other text.
-'''.strip()
+    '''.strip()
     return align_prompt
+
+
+def get_boundary_rebalance_prompt(src_1, src_2, tr_1, tr_2):
+    src_lang = load_key("whisper.detected_language")
+    targ_lang = load_key("target_language")
+    prompt = f'''
+## Role
+You are a subtitle segmentation editor.
+
+## Task
+Two adjacent subtitle blocks may be split at a wrong boundary.
+Adjust the boundary so each block is semantically cleaner, while keeping exactly 2 blocks.
+
+Requirements:
+1. Output exactly 2 source parts and 2 target parts.
+2. Do not add or remove core meaning.
+3. Do not move meaning outside this pair.
+4. Keep each target part aligned to its source part.
+5. If current boundary is already good, return the original texts unchanged.
+
+## INPUT
+<pair>
+source_1 ({src_lang}): "{src_1}"
+source_2 ({src_lang}): "{src_2}"
+target_1 ({targ_lang}): "{tr_1}"
+target_2 ({targ_lang}): "{tr_2}"
+</pair>
+
+## Output in only JSON format and no other text
+```json
+{{
+  "source_1": "Adjusted source part 1",
+  "source_2": "Adjusted source part 2",
+  "target_1": "Adjusted target part 1",
+  "target_2": "Adjusted target part 2"
+}}
+```
+
+Note: Start you answer with ```json and end with ```, do not add any other text.
+'''.strip()
+    return prompt
 
 ## ================================================================
 # @ step8_gen_audio_task.py @ step10_gen_audio.py

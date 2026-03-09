@@ -87,12 +87,18 @@ def transcribe():
     # 2. Demucs vocal separation:
     if load_key("demucs"):
         demucs_audio()
-        vocal_audio = normalize_audio_volume(_VOCAL_AUDIO_FILE, _VOCAL_AUDIO_FILE, format="mp3")
+        vocal_audio = normalize_audio_volume(_VOCAL_AUDIO_FILE, _VOCAL_AUDIO_FILE, format="wav")
     else:
         vocal_audio = _RAW_AUDIO_FILE
 
     # 3. Extract audio
-    segments = split_audio(_RAW_AUDIO_FILE)
+    chunk_minutes = float(load_key("asr_chunk_minutes"))
+    chunk_window_seconds = float(load_key("asr_chunk_window_seconds"))
+    target_len_seconds = 0 if chunk_minutes <= 0 else chunk_minutes * 60.0
+    segments = split_audio(_RAW_AUDIO_FILE, target_len=target_len_seconds, win=chunk_window_seconds)
+
+    # Keep ASR + alignment on the same track when Demucs is enabled to avoid cross-track drift.
+    asr_audio = vocal_audio if load_key("demucs") else _RAW_AUDIO_FILE
     
     # 4. Transcribe audio by clips
     all_results = []
@@ -108,7 +114,7 @@ def transcribe():
         rprint("[cyan]🎤 Transcribing audio with ElevenLabs API...[/cyan]")
 
     for start, end in segments:
-        result = ts(_RAW_AUDIO_FILE, vocal_audio, start, end)
+        result = ts(asr_audio, asr_audio, start, end)
         all_results.append(result)
     
     # 5. Combine results
@@ -117,7 +123,7 @@ def transcribe():
         combined_result['segments'].extend(result['segments'])
 
     # 5.1 Recover large no-word spans by re-running ASR on detected windows.
-    _recover_asr_gaps(ts, runtime, _RAW_AUDIO_FILE, vocal_audio, combined_result)
+    _recover_asr_gaps(ts, runtime, asr_audio, asr_audio, combined_result)
     
     # 6. Process df
     df = process_transcription(combined_result)

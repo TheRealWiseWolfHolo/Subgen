@@ -1,9 +1,11 @@
 import pandas as pd
 from typing import List, Tuple
 import concurrent.futures
+import re
+from difflib import SequenceMatcher
 
 from core._3_2_split_meaning import split_sentence
-from core.prompts import get_align_prompt
+from core.prompts import get_align_prompt, get_boundary_rebalance_prompt
 from rich.panel import Panel
 from rich.console import Console
 from rich.table import Table
@@ -29,6 +31,134 @@ def calc_len(text: str) -> float:
             return 1
 
     return sum(char_weight(char) for char in text)
+
+
+def _safe_load_key(key, default):
+    try:
+        return load_key(key)
+    except Exception:
+        return default
+
+
+def _normalize_compare_text(text: str) -> str:
+    text = str(text).lower()
+    text = re.sub(r"\s+", "", text)
+    text = re.sub(r"[^\w\u4e00-\u9fff]", "", text)
+    return text
+
+
+def _boundary_rebalance_enabled() -> bool:
+    return bool(_safe_load_key("subtitle_boundary_rebalance_with_llm", True))
+
+
+def _boundary_rebalance_max_pairs() -> int:
+    return int(_safe_load_key("subtitle_boundary_rebalance_max_pairs", 20))
+
+
+def _looks_like_bad_boundary(src_1: str, src_2: str, tr_1: str, tr_2: str) -> bool:
+    s1 = str(src_1).strip()
+    s2 = str(src_2).strip()
+    t2 = str(tr_2).strip()
+    if not s1 or not s2:
+        return False
+
+    # Common case: first block looks unfinished while second is long enough to carry two clauses.
+    no_tail_punct = not re.search(r"[.!?。！？…]$|[)\\]\"'”）]$", s1)
+    second_has_inner_pause = bool(re.search(r"[,;:，；：]", s2)) or len(s2.split()) >= 8
+
+    # Translation side signal: second translated block clearly contains connective progression.
+    tr_connective = bool(re.search(r"(然后|之后|接着|接下来|再|并且|而且|随后)", t2))
+    return (no_tail_punct and second_has_inner_pause) or tr_connective
+
+
+def _validate_rebalanced_pair(orig_pair, cand_pair) -> bool:
+    if len(cand_pair) != 4:
+        return False
+    if any(not str(x).strip() for x in cand_pair):
+        return False
+
+    o_src = _normalize_compare_text(orig_pair[0] + orig_pair[1])
+    c_src = _normalize_compare_text(cand_pair[0] + cand_pair[1])
+    o_tr = _normalize_compare_text(orig_pair[2] + orig_pair[3])
+    c_tr = _normalize_compare_text(cand_pair[2] + cand_pair[3])
+    if not o_src or not o_tr or not c_src or not c_tr:
+        return False
+
+    # Guard rails: keep pair-level meaning and length almost unchanged.
+    src_sim = SequenceMatcher(None, o_src, c_src).ratio()
+    tr_sim = SequenceMatcher(None, o_tr, c_tr).ratio()
+    if src_sim < 0.90 or tr_sim < 0.75:
+        return False
+
+    src_len_delta = abs(len(c_src) - len(o_src)) / max(1, len(o_src))
+    tr_len_delta = abs(len(c_tr) - len(o_tr)) / max(1, len(o_tr))
+    if src_len_delta > 0.12 or tr_len_delta > 0.18:
+        return False
+
+    return True
+
+
+def rebalance_adjacent_boundaries_with_llm(src_lines: List[str], tr_lines: List[str]) -> Tuple[List[str], List[str]]:
+    if len(src_lines) < 2 or len(tr_lines) < 2:
+        return src_lines, tr_lines
+    if not _boundary_rebalance_enabled():
+        return src_lines, tr_lines
+
+    max_pairs = max(0, _boundary_rebalance_max_pairs())
+    if max_pairs == 0:
+        return src_lines, tr_lines
+
+    candidates = []
+    for i in range(min(len(src_lines), len(tr_lines)) - 1):
+        if _looks_like_bad_boundary(src_lines[i], src_lines[i + 1], tr_lines[i], tr_lines[i + 1]):
+            candidates.append(i)
+            if len(candidates) >= max_pairs:
+                break
+
+    if not candidates:
+        return src_lines, tr_lines
+
+    fixed_count = 0
+    for i in candidates:
+        src_1 = str(src_lines[i]).strip()
+        src_2 = str(src_lines[i + 1]).strip()
+        tr_1 = str(tr_lines[i]).strip()
+        tr_2 = str(tr_lines[i + 1]).strip()
+
+        prompt = get_boundary_rebalance_prompt(src_1, src_2, tr_1, tr_2)
+
+        def valid_rebalance(resp):
+            required = ("source_1", "source_2", "target_1", "target_2")
+            for key in required:
+                if key not in resp:
+                    return {"status": "error", "message": f"Missing key: {key}"}
+                if not str(resp[key]).strip():
+                    return {"status": "error", "message": f"Empty key: {key}"}
+            return {"status": "success", "message": "ok"}
+
+        try:
+            resp = ask_gpt(
+                prompt,
+                resp_type='json',
+                valid_def=valid_rebalance,
+                log_title='subtitle_boundary_rebalance'
+            )
+            cand_pair = (
+                str(resp["source_1"]).strip(),
+                str(resp["source_2"]).strip(),
+                str(resp["target_1"]).strip(),
+                str(resp["target_2"]).strip(),
+            )
+            orig_pair = (src_1, src_2, tr_1, tr_2)
+            if _validate_rebalanced_pair(orig_pair, cand_pair):
+                src_lines[i], src_lines[i + 1], tr_lines[i], tr_lines[i + 1] = cand_pair
+                fixed_count += 1
+        except Exception:
+            continue
+
+    if fixed_count:
+        console.print(f"[cyan]🧩 Rebalanced subtitle boundaries for {fixed_count} adjacent pair(s).[/cyan]")
+    return src_lines, tr_lines
 
 def align_subs(src_sub: str, tr_sub: str, src_part: str) -> Tuple[List[str], List[str], str]:
     align_prompt = get_align_prompt(src_sub, tr_sub, src_part)
@@ -122,6 +252,7 @@ def split_for_sub_main():
     elif len(remerged) > len(src):
         src += [None] * (len(remerged) - len(src))
     
+    split_src, split_trans = rebalance_adjacent_boundaries_with_llm(split_src, split_trans)
     pd.DataFrame({'Source': split_src, 'Translation': split_trans}).to_excel(_5_SPLIT_SUB, index=False)
     pd.DataFrame({'Source': src, 'Translation': remerged}).to_excel(_5_REMERGED, index=False)
 

@@ -74,6 +74,10 @@ subtitle_gap_close_seconds: 0.1
 subtitle_final_gap_close_seconds: 0.3
 # *Only log "No exact match" when fuzzy score is below this threshold (1.0 means exact).
 subtitle_match_log_threshold: 0.999
+# *LLM post-pass: rebalance suspicious adjacent subtitle boundaries while preserving 1:1 pair alignment
+subtitle_boundary_rebalance_with_llm: true
+# *Maximum adjacent pairs to send to LLM for boundary rebalance in one run
+subtitle_boundary_rebalance_max_pairs: 20
 
 # *Summary length, set low to 2k if using local LLM
 summary_length: 16000
@@ -164,6 +168,10 @@ subtitle_gap_threshold_seconds: 8.0 # Report subtitle timeline holes longer than
 asr_gap_recover: true # Re-run ASR for detected large no-word windows
 asr_gap_recover_padding_seconds: 0.4 # Expand each side of a gap window for retry
 asr_gap_recover_max_windows: 6 # Maximum gap windows to retry per video
+# *ASR chunk length in minutes. Set to 0 to disable chunking and process full audio in one pass.
+asr_chunk_minutes: 30
+# *Silence search window (seconds) around each ASR chunk boundary.
+asr_chunk_window_seconds: 120
 
 
 

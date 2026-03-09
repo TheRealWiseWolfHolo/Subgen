@@ -34,8 +34,7 @@ def demucs_audio():
     console.print("🎵 Separating audio...")
     _, outputs = separator.separate_audio_file(_RAW_AUDIO_FILE)
     
-    kwargs = {"samplerate": model.samplerate, "bitrate": 128, "preset": 2, 
-             "clip": "rescale", "as_float": False, "bits_per_sample": 16}
+    kwargs = {"samplerate": model.samplerate, "clip": "rescale", "as_float": False, "bits_per_sample": 16}
     
     console.print("🎤 Saving vocals track...")
     save_audio(outputs['vocals'].cpu(), _VOCAL_AUDIO_FILE, **kwargs)

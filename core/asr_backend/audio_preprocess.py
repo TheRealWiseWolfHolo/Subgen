@@ -79,7 +79,7 @@ def convert_video_to_audio(video_file: str):
         rprint(f"[blue]🎬➡️🎵 Converting to high quality audio with FFmpeg ......[/blue]")
         subprocess.run([
             'ffmpeg', '-y', '-i', video_file, '-vn',
-            '-c:a', 'libmp3lame', '-b:a', '96k',
+            '-c:a', 'pcm_s16le',
             '-ar', '16000',
             '-ac', '1', 
             '-metadata', 'encoding=UTF-8', _RAW_AUDIO_FILE
@@ -107,6 +107,9 @@ def split_audio(audio_file: str, target_len: float = 30*60, win: float = 120) ->
     rprint(f"[blue]🎙️ Starting audio segmentation {audio_file} {target_len} {win}[/blue]")
     audio = AudioSegment.from_file(audio_file)
     duration = float(mediainfo(audio_file)["duration"])
+    if target_len <= 0:
+        rprint(f"[green]✅ ASR chunking disabled, using full audio: 0.0s -> {duration:.3f}s[/green]")
+        return [(0, duration)]
     if duration <= target_len + win:
         return [(0, duration)]
     segments, pos = [], 0.0
