@@ -74,6 +74,8 @@ subtitle_gap_close_seconds: 0.1
 subtitle_final_gap_close_seconds: 0.3
 # *Only log "No exact match" when fuzzy score is below this threshold (1.0 means exact).
 subtitle_match_log_threshold: 0.999
+# *Merge adjacent subtitle blocks only when Source text is exactly identical (after strip).
+subtitle_merge_exact_source_duplicates: true
 # *LLM post-pass: rebalance suspicious adjacent subtitle boundaries while preserving 1:1 pair alignment
 subtitle_boundary_rebalance_with_llm: true
 # *Maximum adjacent pairs to send to LLM for boundary rebalance in one run

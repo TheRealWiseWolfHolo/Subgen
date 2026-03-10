@@ -63,6 +63,41 @@ def _close_final_small_gaps(df_trans_time):
                 float(df_trans_time.loc[i + 1, 'timestamp'][0])
             )
 
+
+def merge_exact_source_duplicate_blocks(df_trans_time):
+    """
+    Merge adjacent subtitle blocks only when Source text is exactly the same (after strip).
+    Keep the first row's text and expand its timestamp to cover both rows.
+    """
+    if df_trans_time.empty or 'Source' not in df_trans_time.columns:
+        return df_trans_time, 0
+
+    df = df_trans_time.copy().reset_index(drop=True)
+    merged_count = 0
+    i = 0
+
+    while i < len(df) - 1:
+        src_i = str(df.at[i, 'Source']).strip()
+        src_j = str(df.at[i + 1, 'Source']).strip()
+
+        if src_i and src_i == src_j:
+            s1, e1 = map(float, df.at[i, 'timestamp'])
+            s2, e2 = map(float, df.at[i + 1, 'timestamp'])
+            df.at[i, 'timestamp'] = (min(s1, s2), max(e1, e2))
+
+            # Keep first translation by default; if missing, use the second one.
+            if 'Translation' in df.columns:
+                if not str(df.at[i, 'Translation']).strip() and str(df.at[i + 1, 'Translation']).strip():
+                    df.at[i, 'Translation'] = df.at[i + 1, 'Translation']
+
+            df = df.drop(index=i + 1).reset_index(drop=True)
+            merged_count += 1
+            continue
+        i += 1
+
+    df['duration'] = df['timestamp'].apply(lambda x: float(x[1]) - float(x[0]))
+    return df, merged_count
+
 def convert_to_srt_format(start_time, end_time):
     """Convert time (in seconds) to the format: hours:minutes:seconds,milliseconds"""
     def seconds_to_hmsm(seconds):
@@ -504,6 +539,14 @@ def align_timestamp(df_text, df_translate, subtitle_output_configs: list, output
     # Final editor-friendly pass: close small residual gaps between adjacent subtitle blocks.
     _close_final_small_gaps(df_trans_time)
     df_trans_time['duration'] = df_trans_time['timestamp'].apply(lambda x: x[1] - x[0])
+
+    # Optional: merge adjacent duplicates only when Source is exactly the same.
+    if bool(_safe_load_key("subtitle_merge_exact_source_duplicates", True)):
+        df_trans_time, dup_merged_count = merge_exact_source_duplicate_blocks(df_trans_time)
+        if dup_merged_count > 0:
+            console.print(
+                f"[yellow]⚠️ Merged {dup_merged_count} adjacent duplicate subtitle block(s) by exact Source match.[/yellow]"
+            )
 
     # Detect suspicious subtitle timeline holes for easier debugging.
     subtitle_gap_threshold = load_key("subtitle_gap_threshold_seconds")
